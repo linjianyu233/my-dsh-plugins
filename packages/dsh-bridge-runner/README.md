@@ -87,6 +87,13 @@ dsh --profile resident --session-id wx:o9cq80...@im.wechat
   聚合本轮的 `assistant/message` 文本 → `sessions.flush()` 落盘 → 回帧。
 - **模型热切**：`--model`/`--provider` 初始化 `selection.current`；`@model` 指令帧 / `set_model`
   tool 运行时改 `selection.current`，下一次请求即用新模型（复用 session，不丢上下文）。
+- **模型图片能力优雅降级**（多模态切回 text-only 模型）：若一次多模态交互把 `type:"image"`
+  块写进了持久 session 历史，之后热切到一个只声明 `input: ["text"]` 的模型（如
+  `opencode-go/deepseek-v4-flash`），每个请求都会把含图历史发给 LLM，`dsh-llm-pi-ai`
+  会抛 `UNSUPPORTED_CONTENT` 导致空返回。runner 在 `lib/image-compat.mjs` 按
+  `llm.resolveModelInfo` 缓存各模型图片能力，**仅当当前模型已确认不支持图片时**，对
+  `session.deriveMessages()` 的投影剥离图片块（保留文本信封），不改动持久 session，也不影响
+  真正支持图片的模型（kimi-k3 等）。
 - **权限热切**：`permissionPresets.set(session, preset)` 下 sandbox/mode + approval/policy 事件。
 - **工作区**：`--workspace` 决定 `SessionHeader.cwd`（不可变），换工作区由桥侧 rotate 新 session 实现。
 - **换新会话（/clear）**：桥接侧用 `<chatId>@<epoch>` 作为 sessionId，`/clear` 时 epoch+1，

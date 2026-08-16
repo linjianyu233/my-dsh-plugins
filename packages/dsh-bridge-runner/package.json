@@ -4,6 +4,9 @@
   "description": "面向 bridge/客户端的通用常驻会话运行层：固定 sessionId、跨重启 resume、stdio 帧协议，会话管理/工作区/模型切换/agent 编排",
   "type": "module",
   "main": "lib/index.js",
+  "scripts": {
+    "test": "node test-image-compat.mjs"
+  },
   "exports": {
     ".": {
       "types": "./lib/types/index.d.ts",
@@ -19,6 +22,7 @@
   "files": [
     "lib/index.js",
     "lib/startup.js",
+    "lib/image-compat.mjs",
     "cordis.patch.yml",
     "lib/types/**/*.d.ts"
   ],

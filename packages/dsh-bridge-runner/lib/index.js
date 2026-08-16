@@ -19,6 +19,7 @@ import { installModelSelection } from "@deepseek-ai/dsh-agent";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { SessionId } from "@deepseek-ai/dsh-session";
+import { ImageCompatibility } from "./image-compat.mjs";
 
 const name = "resident-runner";
 const inject = ["agentDefaultModel", "agents", "sessions", "permissionPresets", "tools"];
@@ -113,7 +114,12 @@ async function run(ctx, config, io) {
   const sessions = ctx.get("sessions");
   const permissionPresets = ctx.get("permissionPresets");
   const tools = ctx.get("tools");
+  const llm = ctx.get("llm");
   if (agents === void 0 || defaultModel === void 0 || sessions === void 0) return;
+
+  // 图片能力优雅降级：仅当当前模型已确认不支持图片时，剥离发送给 LLM 的历史图片块，
+  // 避免切到 text-only 模型后每次请求都因历史里的 image 块抛 UNSUPPORTED_CONTENT 而空返回。
+  const imageCompat = llm ? new ImageCompatibility(llm) : null;
 
   const identity = SessionId(sessionId);
 
@@ -130,6 +136,13 @@ async function run(ctx, config, io) {
   // 可变 selection：installModelSelection 读取 selection.current，
   // 热切模型 = 改 selection.current（下一次请求即生效，复用同一 session）。
   const selection = { current: { provider: effProvider, model: effModel }, assembled: void 0 };
+
+  // 切换模型时：更新 selection + 保存默认 + 刷新新模型图片能力（异步，不阻塞 reply）。
+  const applyModel = async (provider, model) => {
+    selection.current = { provider, model };
+    try { await defaultModel.saveSelection(selection.current); } catch {}
+    if (imageCompat) await imageCompat.refresh(provider, model);
+  };
 
   const agentOptions = { provider: effProvider, model: effModel };
   let agent = agents.get(identity);
@@ -156,6 +169,14 @@ async function run(ctx, config, io) {
     });
     agent = created;
     io.stderr.write(`dsh-resident: created session ${sessionId}\n`);
+  }
+
+  // 给该会话挂上「text-only 模型剥离历史图片块」的 deriveMessages 投影包裹。
+  if (imageCompat) {
+    imageCompat.install(agent.session);
+    imageCompat.setCurrentGetter(() => selection.current);
+    // 预确认初始模型能力，让第一条消息就按能力正确剥离。
+    imageCompat.refresh(effProvider, effModel).catch(() => {});
   }
 
   // 初始权限：--permission 通过 permissionPresets.set 热切（下 sandbox/mode + approval/policy 事件）
@@ -185,8 +206,7 @@ async function run(ctx, config, io) {
       async execute(args) {
         const sp = splitModel(args.model);
         if (!sp.model) return { ok: false, message: "empty model id" };
-        selection.current = { provider: sp.provider ?? selection.current.provider, model: sp.model };
-        try { await defaultModel.saveSelection(selection.current); } catch {}
+        await applyModel(sp.provider ?? selection.current.provider, sp.model);
         return { ok: true, message: `已切换模型到 ${selection.current.provider}/${selection.current.model}（对话记忆保留）` };
       },
     }));
@@ -235,8 +255,7 @@ async function run(ctx, config, io) {
       const id = ++seq;
       try {
         const sp = splitModel(text.slice("@model ".length));
-        selection.current = { provider: sp.provider ?? selection.current.provider, model: sp.model };
-        await defaultModel.saveSelection(selection.current).catch(() => {});
+        await applyModel(sp.provider ?? selection.current.provider, sp.model);
         emit(id, { ok: true, reply: `模型已切换为 ${selection.current.provider}/${selection.current.model}` });
       } catch (error) {
         emit(id, { ok: false, error: error instanceof Error ? error.message : String(error) });
