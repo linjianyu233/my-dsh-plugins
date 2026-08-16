@@ -409,17 +409,65 @@ function splitForWechat(text, max) {
 }
 
 /** 把长文本按 max 分段，逐段发消息；仅单段时直接返回该段。返回发送的段数。 */
-async function sendChunked(bot, to, ctxToken, text, max) {
+async function sendChunked(bot, to, ctxToken, text, max, attempt = 0) {
   const chunks = splitForWechat(text, max);
-  if (chunks.length === 1) {
-    await bot.sendMessage({ to, text: chunks[0], contextToken: ctxToken });
-    return 1;
+  const sendAll = async () => {
+    if (chunks.length === 1) {
+      await bot.sendMessage({ to, text: chunks[0], contextToken: ctxToken });
+      return 1;
+    }
+    for (let i = 0; i < chunks.length; i++) {
+      const prefix = `(${i + 1}/${chunks.length})\n`;
+      await bot.sendMessage({ to, text: prefix + chunks[i], contextToken: ctxToken });
+    }
+    return chunks.length;
+  };
+  try {
+    return await sendAll();
+  } catch (e) {
+    // 回发微信偶尔因网络抖动(代理长连接被重置)失败；小退避重试一次，避免直接丢回复。
+    const retries = Number(process.env.DSH_WXBOT_SEND_RETRIES ?? 2);
+    if (attempt < retries) {
+      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+      return sendChunked(bot, to, ctxToken, text, max, attempt + 1);
+    }
+    throw e;
   }
-  for (let i = 0; i < chunks.length; i++) {
-    const prefix = `(${i + 1}/${chunks.length})\n`;
-    await bot.sendMessage({ to, text: prefix + chunks[i], contextToken: ctxToken });
+}
+
+/**
+ * 把 DSH 失败信息友好化后回传微信：识别多模态切换相关的错误给出引导，
+ * 其余剥 ANSI + 去换行/控制字符 + 按长度截断，避免刷屏、破坏单行帧。
+ * @param {unknown} err raw error（string / Error / 任意）
+ * @param {number} max 输出最大字符数
+ * @returns {string} 可直接发给微信的文本
+ */
+function formatErrorForWechat(err, max = 800) {
+  const raw = (() => {
+    if (err == null) return "";
+    if (typeof err === "string") return err;
+    if (err instanceof Error) return err.message ?? String(err);
+    if (typeof err === "object" && typeof err.message === "string") return err.message;
+    return String(err);
+  })();
+  const plain = raw.replace(/\x1b\[[0-9;]*m/g, "").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
+
+  // 多模态切换：切到 text-only 模型后，历史里的图片块让底层抛 UNSUPPORTED_CONTENT。
+  // 给出可操作的引导，而不是把 pi-ai 的错误串原样丢给用户。
+  if (/UNSUPPORTED_CONTENT|does not support image input|cannot represent .* image/i.test(plain)) {
+    return (
+      "⚠️ 当前模型不支持图片输入：这次对话里已经有图片内容，而这个模型只接受文本。\n" +
+      "💡 处理办法（任选其一）：\n" +
+      "· 用 /config model <支持图片的模型> 切回多模态模型（例如 opencode-go/kimi-k3、minimax-m3、qwen3.7-plus）；\n" +
+      "· 或 /clear 清除含图片的对话记忆后继续。"
+    );
   }
-  return chunks.length;
+
+  if (plain === "") return "⚠️ DSH 任务失败（无更多信息）。";
+
+  const cap = Math.max(60, Math.floor(max));
+  const text = plain.length > cap ? `⚠️ DSH 任务失败：${plain.slice(0, cap)}…` : `⚠️ DSH 任务失败：${plain}`;
+  return text;
 }
 
 /**
@@ -821,12 +869,14 @@ async function processMessage(bot, cfg, files, state, msg) {
         }),
       );
     }
-    const reply = result.ok ? result.reply : `⚠️ DSH 任务失败：${result.error}`;
+    const reply = result.ok ? result.reply : formatErrorForWechat(result.error, Math.min(state.replyMaxChars, 800));
     const segments = await sendChunked(bot, from, ctxToken, reply, state.replyMaxChars);
     log(`已回复 user=${mask(from)} len=${reply.length} 段=${segments} 用时=${result.durationMs ?? "-"}ms`);
   } catch (e) {
-    log(`处理消息出错: ${e.message}`);
-    await bot.sendMessage({ to: from, text: `⚠️ 处理出错：${e.message}`.slice(0, 500), contextToken: ctxToken }).catch(() => {});
+    log(`处理消息出错: ${e?.message ?? e}`);
+    const em = e instanceof Error ? e.message : String(e ?? "");
+    const msg = formatErrorForWechat(em, 500).replace(/^⚠️ DSH 任务失败：/, "⚠️ 处理出错：");
+    await bot.sendMessage({ to: from, text: msg, contextToken: ctxToken }).catch(() => {});
   } finally {
     if (typingTicket) await bot.sendTyping(from, typingTicket, 2).catch(() => {});
   }
@@ -1037,10 +1087,13 @@ async function doRun(botOpts, cfg, files) {
     try {
       resp = await client.getUpdates(buf, longPollMs, abort.signal);
     } catch (e) {
+      // 网络层错误（fetch 连接被中断/重置，常见于经代理长轮询被隧道重置）：
+      // 长轮询本就该持续挂起，连接被重置时并未丢消息，应快速重试而非长退避。
       consecutiveFailures += 1;
-      log(`getUpdates 网络错误 (${consecutiveFailures}/3): ${e.message}`);
-      await new Promise((r) => setTimeout(r, consecutiveFailures >= 3 ? 30_000 : 2_000));
-      if (consecutiveFailures >= 3) consecutiveFailures = 0;
+      const backoffMs = Math.min(1_500 * Math.max(1, consecutiveFailures - 1), 15_000);
+      log(`getUpdates 网络错误 (${consecutiveFailures}/6): ${e.message}（${backoffMs}ms 后重试）`);
+      await new Promise((r) => setTimeout(r, backoffMs));
+      if (consecutiveFailures >= 6) consecutiveFailures = 0;
       continue;
     }
 
@@ -1050,10 +1103,12 @@ async function doRun(botOpts, cfg, files) {
         await doRelogin(bot, cfg, files, state, "token 失效");
         continue;
       }
+      // 业务/API 层错误（服务端明确返回错误）仍按其严重度退避，避免打爆接口。
       consecutiveFailures += 1;
-      log(`getUpdates 错误 ret=${resp.ret} errcode=${resp.errcode} errmsg=${resp.errmsg ?? ""} (${consecutiveFailures}/3)`);
-      await new Promise((r) => setTimeout(r, consecutiveFailures >= 3 ? 30_000 : 2_000));
-      if (consecutiveFailures >= 3) consecutiveFailures = 0;
+      const apiBackoffMs = consecutiveFailures >= 6 ? 30_000 : 2_000;
+      log(`getUpdates 错误 ret=${resp.ret} errcode=${resp.errcode} errmsg=${resp.errmsg ?? ""} (${consecutiveFailures}/6)`);
+      await new Promise((r) => setTimeout(r, apiBackoffMs));
+      if (consecutiveFailures >= 6) consecutiveFailures = 0;
       continue;
     }
 

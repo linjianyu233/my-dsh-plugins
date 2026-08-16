@@ -157,8 +157,12 @@ export class ResidentPool {
     if (frame.ok) {
       return { ok: true, reply: frame.reply ?? "" };
     }
-    // 子进程出错：丢弃该 resident 以便下次重建
-    this.#residents.delete(residentKey(sessionId, opts));
+    // turn 级错误（runner 标记 turn:true，如切到 text-only 模型后历史 image 块触发
+    // UNSUPPORTED_CONTENT）：resident 进程仍健康，保留它避免无谓的 respawn/resume；
+    // 只有进程崩溃/退出的错误（无 turn 标记）才丢弃该 resident 以便下次重建。
+    if (frame.turn !== true) {
+      this.#residents.delete(residentKey(sessionId, opts));
+    }
     return { ok: false, error: frame.error ?? "resident 返回错误" };
   }
 
