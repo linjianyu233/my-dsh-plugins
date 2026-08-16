@@ -34,11 +34,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/linjianyu233/dsh-wechat-bridge.git"
+    "url": "https://github.com/linjianyu233/my-dsh-plugins.git"
   },
-  "homepage": "https://github.com/linjianyu233/dsh-wechat-bridge#readme",
+  "homepage": "https://github.com/linjianyu233/my-dsh-plugins/tree/main/packages/dsh-wechat-bridge#readme",
   "bugs": {
-    "url": "https://github.com/linjianyu233/dsh-wechat-bridge/issues"
+    "url": "https://github.com/linjianyu233/my-dsh-plugins/issues"
   },
   "license": "MIT"
 }

@@ -2,8 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-green.svg)](package.json)
-[![GitHub](https://img.shields.io/badge/GitHub-linjianyu233%2Fdsh--wechat--bridge-181717.svg?logo=github)](https://github.com/linjianyu233/dsh-wechat-bridge)
-[![Gitee 镜像](https://img.shields.io/badge/Gitee-linjianyu233%2Fdsh--wechat--bridge-red.svg)](https://gitee.com/linjianyu233/dsh-wechat-bridge)
+[![GitHub](https://img.shields.io/badge/GitHub-linjianyu233%2Fmy--dsh--plugins-181717.svg?logo=github)](https://github.com/linjianyu233/my-dsh-plugins)
+[![Gitee 镜像](https://img.shields.io/badge/Gitee-linjianyu233%2Fmy--dsh--plugins-red.svg)](https://gitee.com/linjianyu233/my-dsh-plugins)
 
 把本机 **DSH（DeepSeek Harness）** 变成你微信里的一只「龙虾」🦞：
 微信发消息 → DSH 干活 → 回复回微信。**不需要 OpenClaw、不需要公网服务器、不需要网关。**
@@ -20,7 +20,7 @@
 
 **适合谁？** 已经会装 DSH 的开发者与重度用户；想要一个「随时在微信里」的私有 AI 助理、又不想搭公网服务器的人。
 
-**怎么做？** 直接实现腾讯官方 **iLink Bot 协议**（微信 ClawBot/「龙虾」的同款官方通道）——扫码配对 → 长轮询收消息 → 调用本机 DSH → 发回微信。官方 OpenClaw 插件本身也只是这套协议的客户端，AI 后端（OpenClaw/DeepSeek/…/DSH）完全自选，腾讯只是"管道"。本仓库 `weixin-bot.mjs` 即完整实现（协议依据腾讯官方开源 SDK `@tencent-weixin/openclaw-weixin`，对照版本 2.4.6，详见 [RESEARCH.md](https://github.com/linjianyu233/dsh-wechat-bridge/blob/main/RESEARCH.md)）。
+**怎么做？** 直接实现腾讯官方 **iLink Bot 协议**（微信 ClawBot/「龙虾」的同款官方通道）——扫码配对 → 长轮询收消息 → 调用本机 DSH → 发回微信。官方 OpenClaw 插件本身也只是这套协议的客户端，AI 后端（OpenClaw/DeepSeek/…/DSH）完全自选，腾讯只是"管道"。本仓库 `weixin-bot.mjs` 即完整实现（协议依据腾讯官方开源 SDK `@tencent-weixin/openclaw-weixin`，对照版本 2.4.6，详见 [RESEARCH.md](https://github.com/linjianyu233/my-dsh-plugins/blob/main/packages/dsh-wechat-bridge/RESEARCH.md)）。
 
 特性一览：
 
@@ -78,8 +78,8 @@ npm install -g @linjianyu/dsh-wechat-bridge
 方式 B（Git 源码安装，当前即可用，零依赖秒装）：
 
 ```powershell
-git clone https://github.com/linjianyu233/dsh-wechat-bridge.git
-cd dsh-wechat-bridge
+git clone https://github.com/linjianyu233/my-dsh-plugins.git
+cd my-dsh-plugins/packages/dsh-wechat-bridge
 npm install -g .          # 把 dsh-weixin 命令注册到全局
 ```
 
@@ -89,7 +89,7 @@ Windows 下也可以不安装：双击/运行仓库里的 `dsh-weixin.cmd`，或
 
 ```powershell
 npm update -g @linjianyu/dsh-wechat-bridge                              # 方式 A
-cd dsh-wechat-bridge; git pull; npm install -g .             # 方式 B
+cd my-dsh-plugins/packages/dsh-wechat-bridge; git pull; npm install -g .             # 方式 B
 ```
 
 ### 禁用
@@ -275,7 +275,7 @@ node weixin-bot.mjs sessions --chat <ID>               # 每条消息对应的 D
 ### 回滚
 
 ```powershell
-cd dsh-wechat-bridge; git checkout <上一个稳定 tag>; npm install -g .   # 源码安装
+cd my-dsh-plugins/packages/dsh-wechat-bridge; git checkout <上一个稳定 tag>; npm install -g .   # 源码安装
 npm install -g @linjianyu/dsh-wechat-bridge@<旧版本>                               # npm 安装
 ```
 
@@ -331,13 +331,13 @@ npm run test:loop       # 起 mock iLink 服务器（配合 Quick start 的本�
 
 ### 参考资料与替代实现
 
-- 协议调研笔记（来源清单、实现备忘、与官方 SDK 的差异）：[RESEARCH.md](https://github.com/linjianyu233/dsh-wechat-bridge/blob/main/RESEARCH.md)
+- 协议调研笔记（来源清单、实现备忘、与官方 SDK 的差异）：[RESEARCH.md](https://github.com/linjianyu233/my-dsh-plugins/blob/main/packages/dsh-wechat-bridge/RESEARCH.md)
 - 同类"免 OpenClaw"实现（若想换 Python/Go 或参考配对细节）：`zongrongjin/weixin-ilink`（Python SDK）、`jeffkit/ilink-hub`、`openilink/openilink-hub`（Go + 多语言 SDK）、`liiiiwh/weixin-clawbot-skill`、`minibear2021/wechat_clawbot_sdk`
 
 ## License & security
 
 - **许可证**：MIT，见 [LICENSE](./LICENSE)。
-- **报告安全问题**：请**私下**报告（GitHub Security → Report a vulnerability，或 `[SECURITY]` 前缀 issue），详见 [SECURITY.md](https://github.com/linjianyu233/dsh-wechat-bridge/blob/main/SECURITY.md)；不要在公开 issue 贴 token 或复现细节。
+- **报告安全问题**：请**私下**报告（GitHub Security → Report a vulnerability，或 `[SECURITY]` 前缀 issue），详见 [SECURITY.md](https://github.com/linjianyu233/my-dsh-plugins/blob/main/packages/dsh-wechat-bridge/SECURITY.md)；不要在公开 issue 贴 token 或复现细节。
 - **这是腾讯官方通道**（《微信 ClawBot 功能使用条款》背书），与逆向个人微信协议的封号风险方案本质不同；但条款明确：腾讯只是"管道"、有权限速/过滤/中止服务，**不得用于营销、客服、高频群发**。
 - 凭证 `weixin-auth.json` 含 bot token，**不要提交到版本控制或外传**（`.gitignore` 已覆盖；npm 发布包不含 `data/`）。
 - 任何能给你微信发消息的人都能触发本机 DSH 执行（等于你电脑的操作权）：建议 `--allow-from` 只放行自己的微信号；bot 指令也仅在你自己的对话生效。
