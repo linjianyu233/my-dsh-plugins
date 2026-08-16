@@ -78,9 +78,13 @@ jobs:
         id: publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
         run: |
           set -euo pipefail
+
+          # dry_run 布尔输入在 workflow_dispatch 下可能以字符串/布尔两种形态出现，
+          # 统一经表达式插值比较（两种形态都会正确 stringify 为 "true"/"false"）。
+          DRY_RUN=""
+          [[ "${{ inputs.dry_run }}" == "true" ]] && DRY_RUN="--dry-run"
 
           if [[ "${{ inputs.target }}" == "all" ]]; then
             pkgs=(dsh-wechat-bridge dsh-bridge-runner web-ui-enhance)
@@ -127,7 +131,7 @@ jobs:
   github-release:
     name: 创建 GitHub Release
     needs: publish
-    if: ${{ inputs.create_github_release == 'true' && !fromJSON(inputs.dry_run) }}
+    if: ${{ github.event.inputs.create_github_release == 'true' && github.event.inputs.dry_run == 'false' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
