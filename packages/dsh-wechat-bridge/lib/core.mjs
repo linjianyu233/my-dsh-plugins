@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-export const VERSION = "1.3.0";
+export const VERSION = "1.3.1";
 export const MAX_TEXT_CHARS = 32000;
 
 /**
