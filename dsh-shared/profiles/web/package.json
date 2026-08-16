@@ -1,0 +1,24 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dependencies": {
+    "@linjianyu/dsh-web-ui-enhance": "^0.1.0",
+    "dsh-at-file": "github:omdsh-dev/dsh-at-file",
+    "dsh-better-sidebar": "^0.12.1",
+    "dsh-opencode-go-usage": "^1.2.2",
+    "dshmarket": "^1.4.1"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-opencode-go-usage",
+        "@linjianyu/dsh-web-ui-enhance",
+        "dshmarket",
+        "dsh-better-sidebar",
+        "dsh-at-file"
+      ]
+    }
+  }
+}

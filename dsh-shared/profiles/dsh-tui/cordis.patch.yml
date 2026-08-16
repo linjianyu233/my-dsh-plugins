@@ -1,0 +1,16 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+
+# Alt-screen fullscreen (Claude Code 同款): 应用内鼠标选区（选择即复制）、
+# 滚轮滚动消息列表、双击/三击选词选行。tmux 下只有 fullscreen 模式才启用
+# SGR 鼠标跟踪，滚轮事件才会被 tmux 转发给应用；inline 模式下滚轮被 tmux
+# copy-mode 截获，而 inline 渲染是原地覆写，scrollback 里没有完整历史。
+# 覆盖整行 config（patch 不深合并），重述 bundle 原有字段。
+- id: dsh-tui
+  config:
+    provider: deepseek-official
+    fullscreen: true
+    effort: max
+    preset: !!js process.env.CC_TUI_PRESET ?? undefined
+    sessionId: !!js process.env.DSH_CC_RESUME_SESSION ?? undefined

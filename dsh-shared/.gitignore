@@ -1,0 +1,22 @@
+# 防误提交清单
+# 若未来往 dsh-shared/ 里补文件，务必先在此列出，避免把凭据推进仓库。
+
+# API 凭据（任何真实 key 都不该出现在本目录的任何文件里）
+.credentials.yaml
+credentials.yaml
+*apiKey*
+*api_key*
+*apikey*.yaml
+*.secret
+
+# 本地 link 绝对路径 / 锁文件 / 依赖产物
+node_modules/
+pnpm-lock.yaml
+*.log
+
+# 运行时数据与机器特定文件
+sessions/
+storages/
+attachments/
+gateway/
+.anonymous-user-id

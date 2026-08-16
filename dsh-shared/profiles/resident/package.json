@@ -1,0 +1,15 @@
+{
+  "name": "dsh-profile-resident",
+  "private": true,
+  "dependencies": {
+    "@linjianyu/dsh-bridge-runner": "^0.1.0"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@linjianyu/dsh-bridge-runner"
+      ]
+    }
+  }
+}
