@@ -42,7 +42,7 @@
   "scripts": {
     "build:client": "tsdown -c tsdown.config.mts",
     "watch:client": "tsdown -w -c tsdown.config.mts",
-    "test": "node --test tests/host.test.mjs tests/client-resolve.test.mjs"
+    "test": "node --test tests/host.test.mjs tests/client-resolve.test.mjs tests/mobile-css.test.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

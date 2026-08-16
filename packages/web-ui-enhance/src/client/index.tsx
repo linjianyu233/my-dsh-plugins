@@ -38,6 +38,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives';
 import type { ClientContext, SessionId, SessionListState, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client';
 import type { PropsLocale, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots';
+import { mobileCss, MOBILE_CSS_ID } from './mobile.css';
 
 /** locale 命名空间（与 `apply()` 里 `locale.register` 的键一致）。 */
 export const NS = 'webui';
@@ -178,6 +179,18 @@ function CopySessionIdOverlay({ useSessions, t }: OverlayProps): ReactElement | 
  * @param ctx - client root context（带 slots / sessions / locale 等服务）。
  */
 export function apply(ctx: ClientContext): void {
+  // 移动端 UI 适配：把响应式样式注入 <head>，fiber unload 时随 effect 清理移除。
+  ctx.effect(() => {
+    const style = document.createElement('style');
+    style.id = MOBILE_CSS_ID;
+    style.textContent = mobileCss;
+    document.head.appendChild(style);
+    return () => {
+      const node = document.getElementById(MOBILE_CSS_ID);
+      if (node !== null) node.remove();
+    };
+  }, 'web-ui-enhance: mobile css');
+
   ctx.effect(
     () =>
       ctx.locale.register(NS, {

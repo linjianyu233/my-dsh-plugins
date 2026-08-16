@@ -1,7 +1,11 @@
 # @linjianyu/dsh-web-ui-enhance —— DeepSeek Harness Web UI 增强
 
-对 DSH Web 界面的增量增强插件。当前包含一个功能：**左侧会话树里右键任意会话 →
-「复制 session id」**，用复制出的 id 去别的会话里做**跨 session 协同 / 问题定位**。
+对 DSH Web 界面的增量增强插件。当前包含两个功能：
+
+1. **移动端 UI 适配**：在窄屏（≤720px 手机、≤1024px 平板/横屏）自动缩小整套字号、
+   收紧阅读密度，解决手机上「字体太大、布局不合理」的痛点。
+2. **复制 session id**：左侧会话树里右键任意会话 →「复制 session id」，用复制出的
+   id 去别的会话里做**跨 session 协同 / 问题定位**。
 
 本插件是「**bundle 插件 + client 插件**」双面：
 
@@ -15,11 +19,49 @@
 
 | 功能 | 触发方式 | 效果 |
 |---|---|---|
+| 移动端 UI 适配 | 视口 ≤720px（手机）/ ≤1024px（平板）自动生效 | 缩小字号、收紧阅读密度 |
 | 复制 session id | 左侧会话树右键某个会话 → 选「复制 session id」 | 把该会话的 `sessionId` 写入剪贴板，并弹提示 |
 | 查看当前会话 id | 任意会话里 `/webui-session-id` | 输出当前会话自己的 id（方便分享给别人） |
 | 用 id 引用别的会话 | `/webui-session-ref <id>` | 校验 id 并把裸 id 转成可粘贴的跨会话引用 |
 
-## 2. 你能用它做什么（跨 session 协同 / 问题定位）
+## 2. 移动端 UI 适配
+
+DSH Web UI 桌面级的字号（markdown 正文 16px/28px 等）在手机上会显得过大，导致
+每行字数过少、内容疯狂换行，观感很差。本插件的 client 面在窄视口自动注入一段
+响应式样式，把整套字号等比调小、阅读密度收紧。
+
+### 2.1 它做了什么
+
+- **全局字号缩小**：只覆盖定义在 `body` 上的 `--dsw-font-*` 设计 token（markdown
+  正文 / 标题 / 表格 / 代码块 / 通用 UI 字号），全部 `font: var(--dsw-font-…)`
+  引用随之等比缩小；**字体族、字重、颜色一律不动**，视觉层级保持不变。
+- **两档断点**：
+  - `@media (max-width: 720px)`（手机竖屏）：markdown 正文 16/28 → 15/24，标题、
+    代码块、通用字号整体降一档；
+  - `@media (min-width: 721px) and (max-width: 1024px)`（平板 / 横屏手机）：仅把
+    markdown 正文温和收紧到 15/26。
+
+### 2.2 为什么不动三列布局
+
+DSH 的布局壳（`@deepseek-ai/dsh-client-ui-layout` 的 AppFrame）本身已经是响应式的：
+视口 <1024px 时侧边栏自动折叠为 56px 图标栏，放不下时详情列自动关闭、中心列吃满
+剩余宽度。所以移动端体验差的根因不是「三列没响应」，而是**桌面字号在小屏上过大**。
+因此正确的最小干预就是：在窄屏把字号放大律整体下调一档，而不是去 patch 核心的
+列求解器（那会破坏官方行为、也超出一个增量插件的职责范围）。
+
+### 2.3 实现方式
+
+- 样式以字符串形式放在 `src/client/mobile.css.ts`（`mobileCss` + 固定 id
+  `webui-mobile-css`），避免 tsdown 需要 css-inline 插件。
+- `src/client/index.tsx` 的 `apply()` 里用一个 `ctx.effect` 创建
+  `<style id="webui-mobile-css">` 追加到 `document.head`，fiber unload 时按 id
+  移除，不留残留、不影响其它插件。
+
+> 实现选择：不用 `.css` + CSS Module，因为插件 client bundle 走最朴素的 tsdown
+> （未启用 css inline plugin）；且 CSS Module 会产出哈希类名，反而无法用稳定的
+> `--dsw-font-*` token 覆盖全局字号。
+
+## 3. 你能用它做什么（跨 session 协同 / 问题定位）
 
 DSH 内置了**跨会话引用（session reference）**机制（见
 `@deepseek-ai/dsh-session-reference`）：把一个会话做成**只读快照**，作为带来源的
@@ -38,20 +80,21 @@ DSH 内置了**跨会话引用（session reference）**机制（见
 > 引用是**只读快照**、带来源、受字节预算约束（`maxReferenceBytes` 默认
 > 64KB / 源）。这正合适做问题定位，因为你不想让 B 改动 A。
 
-## 3. 目录结构
+## 4. 目录结构
 
 ```
 packages/web-ui-enhance/
   package.json        双面清单：dsh.bundle.patch + dsh.client（platform:web）
   cordis.patch.yml    bundle patch：把 host 行插进 web profile 的 Loader
   tsdown.config.mts  client 面打包配置（tsdown → lib/client.js）
-  src/client/index.tsx   client 面源码：shell.overlay 右键复制菜单
+  src/client/index.tsx   client 面源码：移动端样式注入 + shell.overlay 右键复制菜单
+  src/client/mobile.css.ts  移动端适配 CSS（字符串导出，随 effect 注入 <head>）
   lib/index.js        host 面源码：/webui-session-id、/webui-session-ref
   lib/types/*.d.ts    类型声明
   tests/*.test.mjs    逻辑测试
 ```
 
-## 4. 安装 / 构建
+## 5. 安装 / 构建
 
 ### 4.1 前提
 
@@ -87,7 +130,7 @@ dsh plugin --profile web add @linjianyu/dsh-web-ui-enhance
 `web` profile 的 bundles；同一行也会被 `client-modules` 的 `dsh.client` 扫描发现，
 从而把 `lib/client.js` 挂进 `__DSH_BOOT__`。重启 `dsh --profile web` 后生效。
 
-## 5. 深入：client 面怎么实现的
+## 6. 深入：client 面怎么实现的
 
 严格走 DSH 的 **slot 架构**，没有 patch 任何核心插件：
 
@@ -111,7 +154,7 @@ session id，通常能精确命中；极端情况（标题重复 / 多个空白�
 匹配。若你希望**完全精确、零歧义**，在 workspace 插件的会话行 `<div>` 上补一个
 `data-session-id={node.id}` 即可（那需要 patch DSH 核心插件，超出本插件范围）。
 
-## 6. 深入：host 面怎么实现
+## 7. 深入：host 面怎么实现
 
 `cordis.patch.yml` 把一个 `@linjianyu/dsh-web-ui-enhance` 行插进 web profile 的
 Loader；该包同时承载 client 面 => client-modules 才能发现它的浏览器 bundle。
@@ -126,7 +169,7 @@ host 面注册两条命令：
 真正“读取被引会话的上下文”由 DSH 核心的 session-reference 快照机制完成（只读、
 带来源、受预算约束），本插件不重复实现，只负责把 id 做成合法引用。
 
-## 7. 测试
+## 8. 测试
 
 ```sh
 cd packages/web-ui-enhance
@@ -137,8 +180,10 @@ node --test tests/
   命中 / 未命中 / 缺参的处理（mock commands + sessionReferenceResolver）。
 - `tests/client-resolve.test.mjs` —— `resolveSessionId` 反解算法的行为契约镜像
   （TS 源在浏览器里跑，这里用纯 JS 镜像做回归保护）。
+- `tests/mobile-css.test.mjs` —— 移动端适配 CSS 的结构不变量（断点、只覆盖
+  `--dsw-font-*` 字号/行高而不动字体族/字重）以及 `<style>` 注入/清理行为契约。
 
-## 8. 后续扩展位
+## 9. 后续扩展位
 
 - 复制后直接“复制会话引用 URI”（`dsh-session:…`）而不是裸 id；
 - 右键菜单增加“在新会话打开该会话的只读快照”等动作；

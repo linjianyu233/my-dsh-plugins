@@ -8,7 +8,7 @@ linjianyu 的 DeepSeek Harness (DSH) 插件 monorepo。所有自研插件以 npm
 |---|---|---|
 | `packages/dsh-wechat-bridge` | `@linjianyu/dsh-wechat-bridge` | 把 DSH 接到微信「龙虾」(ClawBot)：iLink 直连 + 通用桥接 |
 | `packages/dsh-bridge-runner` | `@linjianyu/dsh-bridge-runner` | 面向 bridge/客户端的通用常驻会话运行层（DSH bundle 插件） |
-| `packages/web-ui-enhance` | `@linjianyu/dsh-web-ui-enhance` | Web UI 增强（bundle+client 双面插件）：右键会话复制 session id、跨 session 引用 |
+| `packages/web-ui-enhance` | `@linjianyu/dsh-web-ui-enhance` | Web UI 增强（bundle+client 双面插件）：移动端 UI 适配、右键会话复制 session id、跨 session 引用 |
 
 ## 结构
 
