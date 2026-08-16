@@ -1,0 +1,14 @@
+# @linjianyu/dsh-web-ui-enhance —— bundle patch。
+#
+# 本插件是「bundle 插件 + client 插件」双面：`dsh.bundle.patch` 让 `dsh plugin add`
+# 能把它 reconcile 进 web profile 的 bundles（从而让 client-modules 的 dsh.client
+# 扫描发现它的 `./client` 浏览器 bundle）；同时此处把 host 行插进 Loader，
+# 挂载注册跨会话引用命令的 host 面。
+#
+# 与 dsh-bridge-runner 一样，这是叠加在 web 基础层之上的增量 patch：
+# - insert 的行按 id 去重，重复安装不会叠错。
+# - 命令插件只依赖 commands + sessionReferenceResolver（dsh-web-app 已带）。
+
+- insert:
+    - id: web-ui-enhance
+      name: '@linjianyu/dsh-web-ui-enhance'
