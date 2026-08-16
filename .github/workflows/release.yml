@@ -51,17 +51,17 @@ jobs:
           exit 1
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup pnpm
+        # 不传 version：由根 package.json 的 packageManager: pnpm@11.7.0 单一来源决定，
+        # 避免与 version 输入冲突（ERR_PNPM_BAD_PM_VERSION）。
         uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org
           cache: pnpm
 
@@ -143,7 +143,7 @@ jobs:
           exit 1
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 为每个已发布包创建 GitHub Release
         env:
