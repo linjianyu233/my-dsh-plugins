@@ -1,21 +1,51 @@
 // lib/proxy.js — HTTP + WebSocket(upgrade) 转发，指向「当前 active」后端。
 //
-// 转发配方（P0 已实测闭环）：
-//   - 把入站 Host 重写为 `127.0.0.1:<backendPort>`（loopback authority）
-//   - **删除** Origin 头（空串不行，必须 delete），顺带删除 sec-fetch-site
-//   - 三种路径均可穿透 dsh-web `isTrustedApiRequest` 围栏：
-//       静态 SPA（GET / → 200）、/api RPC（→ 426/…）、/api/events.* WebSocket（→ 101）
-//   - 因此**无需** --trusted-host。
+// 转发配方（P0 已实测闭环）+ 分级处理（P3 修复 dshmarket sameOrigin）：
+//   - DSH 核心 `/api/*`：Host 重写为 `127.0.0.1:<backendPort>`，**删除 Origin/sec-fetch-site**
+//     —— 穿透 dsh-web `isTrustedApiRequest` 围栏（HTTP RPC + /api/events.* WebSocket）。
+//   - 其他路径（静态 SPA、第三方插件如 dshmarket 的 `/dsh-market/*` POST）：
+//     **保留原始 Origin**，并把 Host 设成 Origin 的 host，使请求**同源** 。
+//     —— 因为 dshmarket 的 `sameOrigin()` 要求 `new URL(origin).host === Host`，
+//        若照旧删 Origin 会返回 403 "untrusted origin"。
 //
 // proxy 需要能「切换上游」：GET /set-backend 仅本机调试用；运行时由 orchestrate
 // 通过 setBackend(port) 原子切换。这里实现一个可指向动态目标的上游解析器。
 
 import { createServer, request as httpRequest } from "node:http";
 
-/** 按配方重写请求头：Host 置为 loopback，删除 Origin / sec-fetch-site。 */
-export function forwardHeaders(headers, backendPort) {
-  const h = { ...headers, Host: `127.0.0.1:${backendPort}` };
-  delete h.origin;
+/** 是否 DSH 核心 /api 前缀（使用 loopback+删 Origin 配方）。 */
+function isDshApi(url) {
+  const p = new URL(url || "/", "http://x").pathname;
+  return p === "/api" || p.startsWith("/api/");
+}
+
+/**
+ * 按路径分级重写请求头。
+ * @param {object} headers
+ * @param {number} backendPort
+ * @param {string} url 请求原始 URL（判断前缀）
+ */
+export function forwardHeaders(headers, backendPort, url = "/") {
+  if (isDshApi(url)) {
+    // DSH 核心 /api：loopback Host + 删 Origin，穿透围栏
+    const h = { ...headers, Host: `127.0.0.1:${backendPort}` };
+    delete h.origin;
+    delete h["sec-fetch-site"];
+    return h;
+  }
+  // 非 /api（SPA / dsh-market 等）：保留 Origin，并把 Host 设为 Origin 的 host（同源）。
+  const h = { ...headers };
+  const origin = h.origin;
+  if (origin && typeof origin === "string") {
+    try {
+      const u = new URL(origin);
+      h.host = u.host; // 含端口，满足 sameOrigin 的 new URL(origin).host === host
+      h["x-forwarded-host"] = h.host;
+      return h;
+    } catch {}
+  }
+  // 无 Origin（如简单导航 GET）：维持 loopback Host 即可（静态资源无同源要求）。
+  h.host = `127.0.0.1:${backendPort}`;
   delete h["sec-fetch-site"];
   return h;
 }
@@ -47,7 +77,7 @@ export function createGateway({ getBackend, onError = () => {} }) {
         port: backend.port,
         method: req.method,
         path: req.url,
-        headers: forwardHeaders(req.headers, backend.port),
+        headers: forwardHeaders(req.headers, backend.port, req.url),
       },
       (pres) => {
         res.writeHead(pres.statusCode, pres.headers);
@@ -86,7 +116,7 @@ export function createGateway({ getBackend, onError = () => {} }) {
       port: backend.port,
       method: "GET",
       path: req.url,
-      headers: forwardHeaders(req.headers, backend.port),
+      headers: forwardHeaders(req.headers, backend.port, req.url),
     });
     up.on("upgrade", (pres, usocket, uhead) => {
       // 回传上游 101 状态行 + 响应头（含 Sec-WebSocket-Accept），再转发 body head
