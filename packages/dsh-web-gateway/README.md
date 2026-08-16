@@ -48,9 +48,22 @@ dsh-gateway open-update --port 8181 -p /path/to/new-patch.yml
 #    强制跳过空闲等待：
 dsh-gateway open-update --port 8181 --force
 
-# 4) 停止
+# 4) 诊断（P2 Doctor：规则 + LLM 兜底）
+dsh-gateway doctor --port 8181
+
+# 5) 停止
 dsh-gateway exit --port 8181
 ```
+
+### Doctor（P2）
+
+- **规则诊断**：覆盖 `EADDRINUSE`、patch/overlay 文件缺失、patch 引用不存在条目（YAML 结构错）、`--patch` 参数顺序错、`--host 0.0.0.0` 被拒等高频错误，输出结构化 `{verdict, detail, fix}`。
+- **LLM 兜底**：未命中规则时，把最近实例日志（+ 可选 dump-config）喂给 DeepSeek（`DEEPSEEK_API_KEY`，读环境变量或 `~/.dsh/.credentials.yaml`），要求返回 JSON 修复指令 `{file, change, reason}`。修复指令由编排层 apply 到 **staging** 验证后才上线，模型绝不直接改 active/profile。
+- 凭据缺失/无效 → 优雅降级返回 `{ok:false, reason}`，不阻塞。
+
+### Watchdog 自拉起（P2a，可选）
+
+`DSH_GATEWAY_WATCHDOG=1` 启用：定时探活 active，连续失败 3 次自动以**相同配置**重拉新实例（探活到 ready 后接回代理），带退避防抖（默认 10s，防崩溃循环）。open-update 期间自动暂停监控。
 
 浏览器访问：`http://127.0.0.1:8181/`（同一地址长期不变）。
 
@@ -98,20 +111,27 @@ open-update
 | 持 WS 时 `--force` | `switched` |
 | staging 启动失败 | `not-switched:staging-failed`，active 不变，网关继续 200 |
 | `$DSH_HOME/sessions` | 切换前后不变（会话未丢） |
+| watchdog：kill active 后端 | 3 次探活失败自动重拉，网关恢复 200 |
+| doctor：坏 patch 触发 staging 失败后 | 规则命中 `PATCH_NOT_FOUND` + 修复建议 |
+| doctor：未知错误 | LLM 兜底被调用；key 无效时返回 `{ok:false}` 降级 |
 
 ## 目录结构
 
 ```
 packages/dsh-web-gateway/
   index.js            CLI + 常驻 daemon 入口
-  lib/gate.js         组装 registry/proxy/spawn/orchestrate + 控制端 API
+  lib/gate.js         组装 registry/proxy/spawn/orchestrate + 控制端 API（含 doctor action）
   lib/registry.js     active/staging 槽位状态机
   lib/spawn.js        分配空闲端口 + spawn dsh web（捕获日志）
   lib/prober.js       探活组合（PID/TCP/HTTP）
   lib/proxy.js        HTTP + WS 转发（Host 重写 + 删 Origin；WS 原样回传 101）
   lib/idle.js         空闲采样（in-flight 计数 + 安静窗口）
   lib/orchestrate.js  蓝绿流程 + 回滚
+  lib/watchdog.js     active 健康监控 + 自拉起（阈值/防抖/退避）
+  lib/doctor.js       规则诊断引擎（EADDRINUSE/patch/config 等）
+  lib/ai.js           LLM 兜底（DeepSeek chat，读凭据/环境变量，可降级）
   tests/unit.test.mjs
+  tests/p2.test.mjs
 ```
 
 ## 范围外（后续阶段）

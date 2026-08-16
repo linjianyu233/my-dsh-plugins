@@ -35,10 +35,11 @@ function parseArgs(argv) {
 
 function usage() {
   return [
-    "usage: dsh-gateway <up|status|open-update|exit> [options]",
+    "usage: dsh-gateway <up|status|open-update|doctor|exit> [options]",
     "  up            start daemon: bootstrap active + gateway proxy + control (blocking)",
     "  status        query running daemon",
     "  open-update   ask running daemon to blue-green cutover (with new -p patches)",
+    "  doctor        diagnose active backend startup problems (rule + AI fallback)",
     "  exit          stop running daemon",
     "options:",
     "  -p, --patch <file>   extra --patch overlay for the (new) backend",
@@ -99,6 +100,9 @@ async function main() {
     process.stdout.write(JSON.stringify(r, null, 2) + "\n");
   } else if (cmd === "open-update") {
     const r = await controlCall(opts.gatewayPort, "open-update", { patches: opts.patches, force: opts.force });
+    process.stdout.write(JSON.stringify(r, null, 2) + "\n");
+  } else if (cmd === "doctor") {
+    const r = await controlCall(opts.gatewayPort, "doctor");
     process.stdout.write(JSON.stringify(r, null, 2) + "\n");
   } else if (cmd === "exit") {
     const r = await controlCall(opts.gatewayPort, "exit").catch((e) => ({ statusCode: 0, body: { error: e.message } }));

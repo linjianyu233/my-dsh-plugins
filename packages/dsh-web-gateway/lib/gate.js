@@ -5,11 +5,16 @@
 
 import { createGateway } from "./proxy.js";
 import { Registry } from "./registry.js";
-import { spawnBackend, allocPort } from "./spawn.js";
+import { spawnBackend, allocPort, logDir } from "./spawn.js";
 import { singleProbe, waitUntil } from "./prober.js";
 import { openUpdate } from "./orchestrate.js";
 import { createIdleMonitor } from "./idle.js";
+import { Watchdog } from "./watchdog.js";
+import { diagnoseLog } from "./doctor.js";
+import { askFix } from "./ai.js";
 import { createServer } from "node:http";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 /** 控制端端口 = 网关端口 + 0x1000（仅 127.0.0.1）。 */
 export function controlPort(gatewayPort) {
@@ -61,10 +66,25 @@ export class Gate {
    * 初始化：拉起初始 active（若还没有）并启动网关。
    */
   async init({ profile = "web", patches = [] } = {}) {
+    this.profile = profile;
+    this.patches = patches;
     if (!this.registry.active().port) {
       await this._bootstrapActive({ profile, patches });
     }
     await this._startProxy();
+    // 可选 watchdog 自拉起：DSH_GATEWAY_WATCHDOG=1 启用
+    if (process.env.DSH_GATEWAY_WATCHDOG === "1") {
+      this.watchdog = new Watchdog(
+        {
+          registry: this.registry,
+          proxy: this.proxyCore,
+          capture: (m) => this._log(m),
+        },
+        { profile, patches, readyTimeoutMs: this.readyTimeoutMs }
+      );
+      this.watchdog.start();
+      this._log("watchdog started (DSH_GATEWAY_WATCHDOG=1)");
+    }
     return this;
   }
 
@@ -112,7 +132,7 @@ export class Gate {
       },
       { quietWindowMs: 1500 }
     );
-    return openUpdate(
+    const result = await openUpdate(
       {
         registry: this.registry,
         proxy: this.proxyCore,
@@ -121,6 +141,51 @@ export class Gate {
       },
       { patches, force, idleTimeoutMs, readyTimeoutMs: this.readyTimeoutMs }
     );
+    // 仅在真正切流成功后短暂暂停 watchdog（新 active 已 ready，给个保守余量）；
+    // staging 失败 / active-busy 未动 active，无需暂停。
+    if (result.switched && this.watchdog) {
+      this.watchdog.pause(15000);
+      this._log("watchdog paused 15s after cutover");
+    }
+    return result;
+  }
+
+  /**
+   * 取后端实例最近一个日志文件内容。默认角色 active；若 active 无日志/太老，
+   * 回退到「最近修改的日志」（覆盖 staging 刚失败的场景）。
+   */
+  _latestBackendLog(role = "active") {
+    const dir = logDir();
+    try {
+      const all = readdirSync(dir)
+        .filter((f) => /^(active|staging)-.+\.log$/.test(f))
+        .map((f) => ({ f, mtime: statSync(join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+      if (all.length === 0) return "";
+      // 默认取「最新修改」的日志：staging 刚失败时应诊断 staging，
+      // active 刚崩溃时应诊断 active。role 指定时才严格按角色取。
+      const pick = role === "latest" ? all[0] : (all.find((x) => x.f.startsWith(role)) || all[0]);
+      return readFileSync(join(dir, pick.f), "utf8").slice(-20000);
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Doctor：诊断最近一次启动/切换问题。
+   * 1) 规则诊断（EADDRINUSE/patch/config 等高频模式）
+   * 2) 未命中 => LLM 兜底（askFix），产出结构化修复建议
+   * 返回 { diagnosis, ai? }。
+   */
+  async doctor() {
+    const logText = this._latestBackendLog("latest");
+    const diagnosis = diagnoseLog(logText, { profile: this.profile });
+    const out = { diagnosis };
+    if (diagnosis.verdict === "unknown" && logText) {
+      const ai = await askFix(logText, { profile: this.profile });
+      out.ai = ai;
+    }
+    return out;
   }
 
   /**
@@ -158,6 +223,9 @@ export class Gate {
               force: !!body.force,
             });
             res.end(JSON.stringify({ message: out.switched ? "switched" : `not-switched:${out.reason}`, ...self.status() }));
+          } else if (action === "doctor") {
+            const doc = await self.doctor();
+            res.end(JSON.stringify(doc));
           } else if (action === "exit") {
             res.end(JSON.stringify({ message: "bye" }));
             self._log("control: exit requested");
@@ -188,6 +256,7 @@ export class Gate {
 
   /** 关闭控制端、网关 proxy，并终止仍存活的后端子进程。 */
   async shutdown() {
+    if (this.watchdog) this.watchdog.stop();
     for (const role of ["active", "staging"]) {
       const slot = role === "active" ? this.registry.active() : this.registry.staging();
       if (slot && slot.child && slot.child.exitCode === null && slot.child.signalCode === null) {

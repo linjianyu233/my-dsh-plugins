@@ -26,7 +26,7 @@ done
 sleep 1
 
 echo "== 1) up：拉起 active + 网关 =="
-DSH_GATEWAY_LOGS_DIR=/tmp/gw-e2e-logs node index.js up --port $GW_PORT --profile web > /tmp/gw-e2e-up.log 2>&1 &
+DSH_GATEWAY_LOGS_DIR=/tmp/gw-e2e-logs DSH_GATEWAY_WATCHDOG="${DSH_GATEWAY_WATCHDOG:-0}" node index.js up --port $GW_PORT --profile web > /tmp/gw-e2e-up.log 2>&1 &
 DAEMON=$!
 sleep 8
 CODE=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:$GW_PORT/ 2>/dev/null)
@@ -70,7 +70,27 @@ echo "== 5) WS 释放后再切 =="
 MSG=$(node index.js open-update --port $GW_PORT 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["body"].get("message",""))')
 check "再次切换成功" "switched" "$MSG"
 
-echo "== 6) 5100 完好性（若存在）=="
+echo "== 6) P2 Doctor：坏 patch 触发 staging 失败后诊断命中 =="
+node index.js open-update --port $GW_PORT -p /tmp/definitely-not-exist.yml >/dev/null 2>&1
+VD=$(node index.js doctor --port $GW_PORT 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["body"]["diagnosis"]["verdict"])')
+check "doctor 命中 PATCH_NOT_FOUND" "PATCH_NOT_FOUND" "$VD"
+
+echo "== 7) P2 Watchdog：kill active 自动重拉（需 DSH_GATEWAY_WATCHDOG=1 启动）=="
+if [ "${DSH_GATEWAY_WATCHDOG:-0}" = "1" ]; then
+  # 等过 open-update 成功后的 15s watchdog pause 再 kill，确保监控已恢复
+  sleep 18
+  P1=$(node index.js status --port $GW_PORT 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["body"]["active"]["pid"])')
+  kill -9 $P1 2>/dev/null
+  sleep 15
+  P2=$(node index.js status --port $GW_PORT 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["body"]["active"]["pid"])')
+  [ "$P1" != "$P2" ] && echo "  ✓ watchdog 自动重拉 (pid $P1 -> $P2)" && PASS=$((PASS+1)) || { echo "  ✗ watchdog 未重拉"; FAIL=$((FAIL+1)); }
+  CODE=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:$GW_PORT/ 2>/dev/null)
+  check "watchdog 重拉后网关恢复" "200" "$CODE"
+else
+  echo "  (跳过：未启用 DSH_GATEWAY_WATCHDOG)"
+fi
+
+echo "== 8) 5100 完好性（若存在）=="
 if lsof -iTCP:5100 -sTCP:LISTEN -P -n >/dev/null 2>&1; then
   echo "  ✓ 5100 (DSH GUI) 仍在监听（未被波及）"
   PASS=$((PASS+1))
