@@ -1,0 +1,15 @@
+{
+  "name": "my-dsh-plugins",
+  "version": "0.0.0",
+  "private": true,
+  "description": "linjianyu 的 DSH 插件 monorepo：wechat bridge、通用 bridge-runner 等",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "pnpm -r run test",
+    "publish:all": "pnpm -r publish --no-git-checks"
+  },
+  "license": "MIT"
+}

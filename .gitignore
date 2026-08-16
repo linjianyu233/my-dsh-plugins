@@ -1,0 +1,29 @@
+# 依赖与产物
+node_modules/
+*.tgz
+*.log
+dist/
+
+# 运行时数据（凭证/记忆/工作目录）
+data/
+test-data/
+
+# 登录凭证（含微信 bot token，切勿入库）
+weixin-auth.json
+weixin-syncbuf.txt
+
+# npm 认证（可能含 token，勿入库）
+# 根 .npmrc 仅含 @linjianyu scope 映射（可提交、无害）；各包内的 .npmrc 可能含 token，忽略之。
+**/.npmrc
+!.npmrc
+
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 调研/研究笔记（过程产物，勿入库）
+_res-*.md
+_dsh-doc-*.md

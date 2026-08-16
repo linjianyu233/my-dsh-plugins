@@ -1,0 +1,31 @@
+# 常驻 agent runner 的 bundle patch：直接叠加在 dsh-base 之上（与 dsh-headless 同构）。
+# 无 Host/HTTP/浏览器层；由本 bundle 的 startup 提供 --session-id，runner 常驻并从 stdin 读消息。
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+
+- id: hmr
+  disabled: true
+
+- id: tools
+  config:
+    mode: !!js process.env.DSH_TOOLS_MODE
+
+- insert:
+    - id: code-runtime
+      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+
+    - id: resident-startup
+      name: '@linjianyu/dsh-bridge-runner/startup'
+
+    - id: resident-runner
+      name: '@linjianyu/dsh-bridge-runner'
+      inject: [residentStartup]
+      config:
+        sessionId: !!js ctx.residentStartup.sessionId
+        workspace: !!js ctx.residentStartup.workspace
+        permission: !!js ctx.residentStartup.permission
+        model: !!js ctx.residentStartup.model
+        provider: !!js ctx.residentStartup.provider
