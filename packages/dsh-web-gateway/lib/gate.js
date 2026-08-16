@@ -64,12 +64,17 @@ export class Gate {
 
   /**
    * 初始化：拉起初始 active（若还没有）并启动网关。
+   * HA：gateway 自身重启后，若发现存量活的 dsh web 实例（孤儿），先纳管再服务，
+   * 避免另起一个重复实例。
    */
   async init({ profile = "web", patches = [] } = {}) {
     this.profile = profile;
     this.patches = patches;
     if (!this.registry.active().port) {
-      await this._bootstrapActive({ profile, patches });
+      const adopted = await this._adoptExisting({ profile });
+      if (!adopted) {
+        await this._bootstrapActive({ profile, patches });
+      }
     }
     await this._startProxy();
     // 可选 watchdog 自拉起：DSH_GATEWAY_WATCHDOG=1 启用
@@ -86,6 +91,48 @@ export class Gate {
       this._log("watchdog started (DSH_GATEWAY_WATCHDOG=1)");
     }
     return this;
+  }
+
+  /**
+   * 重纳管存量 dsh web 实例（gateway 重启后孤儿 active）。
+   * 扫描系统进程里的 `dsh --profile web`（排除 5100 GUI），
+   * 挑一个还活着、HTTP 就绪的实例纳管为 active。
+   * @returns {Promise<boolean>} 是否纳管成功
+   */
+  async _adoptExisting({ profile = "web" } = {}) {
+    const { execFileSync } = await import("node:child_process");
+    let lines;
+    try {
+      lines = execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8" }).split("\n");
+    } catch {
+      return false;
+    }
+    const candidates = [];
+    for (const line of lines) {
+      const m = line.match(/^\s*(\d+)\s+(.+)$/);
+      if (!m) continue;
+      const pid = Number(m[1]);
+      const args = m[2];
+      if (!args.includes("dsh") || !args.includes("--profile") || !args.includes(profile)) continue;
+      if (/--port\s+5100/.test(args)) continue; // 绝不纳管 GUI 宿主
+      const portM = args.match(/--port\s+(\d+)/);
+      if (!portM) continue;
+      const port = Number(portM[1]);
+      candidates.push({ pid, port, args });
+    }
+    // 从监听端口反查最可信：只信真正 listen 且 probe 通过的
+    for (const c of candidates) {
+      const probe = await singleProbe({ pid: c.pid, port: c.port });
+      if (!probe) continue;
+      const slot = this.registry.claim("active");
+      slot.pid = c.pid;
+      slot.port = c.port;
+      slot.child = { exitCode: null, signalCode: null, pid: c.pid, kill: (sig) => { try { process.kill(c.pid, sig); } catch {} } };
+      this.registry.setState(slot, "ready");
+      this._log(`adopted existing active pid=${c.pid} on :${c.port}`);
+      return true;
+    }
+    return false;
   }
 
   async _bootstrapActive({ profile, patches }) {

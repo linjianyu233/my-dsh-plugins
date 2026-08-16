@@ -65,6 +65,13 @@ dsh-gateway exit --port 8181
 
 `DSH_GATEWAY_WATCHDOG=1` 启用：定时探活 active，连续失败 3 次自动以**相同配置**重拉新实例（探活到 ready 后接回代理），带退避防抖（默认 10s，防崩溃循环）。open-update 期间自动暂停监控。
 
+### 网关自身 HA（P3）
+
+- **systemd 保活**：`~/.config/systemd/user/dsh-gateway.service`（`Restart=always`，自动拉起）。注意 systemd user 环境 PATH 窄，unit 里必须显式带 nvm bin 的 `PATH`，否则 `dsh`（`#!/usr/bin/env node`）起不来。
+- **重启重纳管**：gateway 重启后若发现存量存活的原 active（孤儿），`_adoptExisting()` 直接纳管（pid/port 进 registry），不另起重复实例；绝不纳管 5100（GUI 宿主）。
+- **adopt 兼容**：被纳管的 active 的 `child` 是 shim（无真实 exit 事件）；`terminate()`/`waitExit()` 对 shim 回退到 `pidAlive` 轮询，保证 open-update 的 drain 对纳管实例同样有效。
+- 完整闭环已验证：`kill -9 gateway` → systemd 拉起 → 恢复 200 → 可继续蓝绿切换 → tailscale 不变。
+
 浏览器访问：`http://127.0.0.1:8181/`（同一地址长期不变）。
 
 ### 关于 `--patch` 参数顺序（D 关键陷阱）
@@ -120,13 +127,13 @@ open-update
 ```
 packages/dsh-web-gateway/
   index.js            CLI + 常驻 daemon 入口
-  lib/gate.js         组装 registry/proxy/spawn/orchestrate + 控制端 API（含 doctor action）
+  lib/gate.js         组装 registry/proxy/spawn/orchestrate + 控制端 API（含 doctor、adopt 纳管）
   lib/registry.js     active/staging 槽位状态机
   lib/spawn.js        分配空闲端口 + spawn dsh web（捕获日志）
   lib/prober.js       探活组合（PID/TCP/HTTP）
   lib/proxy.js        HTTP + WS 转发（Host 重写 + 删 Origin；WS 原样回传 101）
   lib/idle.js         空闲采样（in-flight 计数 + 安静窗口）
-  lib/orchestrate.js  蓝绿流程 + 回滚
+  lib/orchestrate.js  蓝绿流程 + 回滚（含 shim-child drain 兼容）
   lib/watchdog.js     active 健康监控 + 自拉起（阈值/防抖/退避）
   lib/doctor.js       规则诊断引擎（EADDRINUSE/patch/config 等）
   lib/ai.js           LLM 兜底（DeepSeek chat，读凭据/环境变量，可降级）

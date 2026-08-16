@@ -215,7 +215,7 @@ packages/dsh-web-gateway/
 | **P0｜探活 + 稳定地址单后端** | gateway 常驻 + proxy + prober；管一个 `dsh web`（127.0.0.1 + 分配端口） | ✅ **已完成**：HTTP+WS 穿透配方实测、`up` 拉起 active + 探活 | 无 |
 | **P1｜蓝绿切换** | `open-update` 拉起 staging → 探活 → **等服务空闲(无 in-flight turn)** → 切流 → drain 旧进程 | ✅ **已完成**（`packages/dsh-web-gateway`，`scripts/e2e.sh` 10/10 绿）：切换地址不变、刷新即用新版、staging 失败自动回滚、持 WS 时拒切（active-busy）、`--force` 强切、会话不丢、5100 未波及 | P0 |
 | **P2｜Doctor** | watchdog 健康监控+自拉起（阈值/防抖/退避）+ 规则诊断 + LLM 兜底修复 | ✅ **已完成**：kill active → 自动重拉恢复；坏 patch → `PATCH_NOT_FOUND` 规则命中；未知错误 → DeepSeek 兜底（key 无效优雅降级）；修复建议结构化 `{file,change,reason}`（apply 只走 staging）；e2e 13/13 绿 | P0 |
-| **P3｜Gateway 自身 HA** | systemd/supervisor 保活 + 重启后重纳管存量实例 | gateway 崩溃后自动恢复并重新纳管仍活着的 `dsh web` | P0 |
+| **P3｜Gateway 自身 HA** | systemd/supervisor 保活 + 重启后重纳管存量实例 | ✅ **已完成**：`~/.config/systemd/user/dsh-gateway.service`（Restart=always + nvm PATH）；`_adoptExisting()` 重启后纳管孤儿 active（排除 5100）；terminate 对 shim child 回退 pidAlive 轮询；验证 kill -9 → 自动拉起 → 恢复 200 → 可继续蓝绿 | P0 |
 
 每阶段独立可交付、可回滚，避免一次性上整套重型编排。
 

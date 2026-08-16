@@ -13,13 +13,29 @@
 // 确保 active 仍是旧实例，删掉 staging 即完成回滚。e2e 通过逐个断言确认。
 
 import { spawnBackend, allocPort, logDir } from "./spawn.js";
-import { singleProbe, waitUntil, sleep } from "./prober.js";
+import { singleProbe, waitUntil, sleep, pidAlive } from "./prober.js";
 import { waitIdle } from "./idle.js";
 import { HEALTH } from "./registry.js";
 
-/** 等待子进程自然退出。 */
+/** 等待子进程自然退出。支持 adopt 的 shim child（无 exit 事件，按 pidAlive 轮询）。 */
+function isRealChild(child) {
+  return typeof child?.once === "function" && "exitCode" in child;
+}
+
 function waitExit(child, timeoutMs = 6000) {
   return new Promise((resolve) => {
+    if (!isRealChild(child)) {
+      // shim：轮询 pidAlive
+      const pid = child.pid;
+      const t0 = Date.now();
+      const timer = setInterval(() => {
+        if (!pidAlive(pid) || Date.now() - t0 >= timeoutMs) {
+          clearInterval(timer);
+          resolve(!pidAlive(pid));
+        }
+      }, 200);
+      return;
+    }
     if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
     const timer = setTimeout(() => resolve(false), timeoutMs);
     child.once("exit", () => {
@@ -31,6 +47,27 @@ function waitExit(child, timeoutMs = 6000) {
 
 /** 向子进程发信号；返回是否已退出。 */
 async function terminate(child, timeoutMs = 6000) {
+  if (!isRealChild(child)) {
+    // 兼容 adopt 的 shim：直接 SIGTERM → SIGKILL，轮询 pidAlive
+    let pid = child.pid;
+    if (pidAlive(pid)) {
+      try { process.kill(pid, "SIGTERM"); } catch {}
+    }
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      if (!pidAlive(pid)) return true;
+      await sleep(200);
+    }
+    if (pidAlive(pid)) {
+      try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+    const t1 = Date.now();
+    while (Date.now() - t1 < 2000) {
+      if (!pidAlive(pid)) return true;
+      await sleep(200);
+    }
+    return !pidAlive(pid);
+  }
   if (child.exitCode !== null) return true;
   child.kill("SIGTERM");
   if (await waitExit(child, timeoutMs)) return true;

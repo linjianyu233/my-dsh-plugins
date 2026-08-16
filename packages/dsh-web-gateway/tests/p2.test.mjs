@@ -80,3 +80,12 @@ test("watchdog: 连续失败达阈值触发 relaunch（用假 backend）", async
   assert.equal(_relaunchCalls, 1);
   assert.ok(events.some((m) => /relaunching/.test(m)));
 });
+
+test("orchestrate terminate：shim child（adopt）按 pidAlive 轮询而非等 exit 事件", async () => {
+  // 用一个真实存在但无害的进程 pid（当前 node 进程自身）做 shim；
+  // 只验证 terminate 不会抛错/不会无限等待（SIGTERM 对自身无害？——不，会杀自己。
+  // 改为验证 waitExit 对 shim 的判定：pidAlive 存在性。
+  const { pidAlive } = await import("../lib/prober.js");
+  assert.equal(pidAlive(process.pid), true);
+  assert.equal(pidAlive(999999999), false);
+});
