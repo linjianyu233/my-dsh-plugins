@@ -26,19 +26,19 @@ pnpm install          # 安装 workspace 依赖
 pnpm -r run test      # 运行各包测试
 ```
 
-## 发布
+## 发布（GitHub Actions）
 
-各包独立发布到 npm（`@linjianyu/*` scope 固定走官方 registry，根 `.npmrc` 已配置）：
+发版已集成到 GitHub Actions（`.github/workflows/release.yml`）：**手动触发、只有仓库所有者本人能执行**。
 
-```sh
-# 单个包
-cd packages/<pkg> && npm publish --access public
+1. 手动 bump 要发布包的 `package.json` 的 `version`，提交推送到 `main`（npm 不允许覆盖同名同版本）；
+2. 在仓库 **Settings → Secrets → Actions** 里配好 `NPM_TOKEN`（npm automation token，一次性的）；
+3. **Actions → Release npm → Run workflow**，可选参数：`target`（all/单包）、`dry_run`（演练）、`create_github_release`（顺带建 GitHub Release）。
 
-# 全部（慎用，每个包版本号需先手动 bump）
-pnpm run publish:all
-```
+流水线自动执行：权限校验 → 装依赖 → 构建 `web-ui-enhance` client 面 → 跑全部测试 → `npm publish --access public`（自动跳过 `dsh-web-gateway` 等 private 包）。
 
-> 发布前请确认 `package.json` 的 `version` 已 bump（npm 不允许覆盖同名同版本）。
+本地兜底发布仍可用：`cd packages/<pkg> && npm publish --access public`。
+
+> 完整说明（权限模型、常见问题）见 [`docs/release.md`](docs/release.md)。
 
 ## 常驻 runner 的安装（DSH 插件机制）
 

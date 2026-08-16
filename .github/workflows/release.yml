@@ -1,0 +1,168 @@
+name: Release npm
+
+# 发版入口：只允许 workflow_dispatch 手动触发，不会因 push/PR 自动发布。
+# 权限模型：job 内第一步校验触发者必须是仓库所有者本人（github.repository_owner），
+# 其余人即使有仓库 write 权限也会被直接 fail。详见 docs/release.md。
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: '要发布的包：all = 除 private 外的全部包；也可单选一个包'
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - dsh-wechat-bridge
+          - dsh-bridge-runner
+          - web-ui-enhance
+      dry_run:
+        description: '演练模式：全流程预览（npm publish --dry-run），不真正上传'
+        required: false
+        default: false
+        type: boolean
+      create_github_release:
+        description: '发布成功后为每个已发布包创建 GitHub Release（tag 形如 <包目录>@<version>）'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+# 全局最小权限：只读。仅 github-release job 单独放开 contents: write。
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: 权限校验 + 测试 + 构建 + 发布到 npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+    steps:
+      # ---- 权限门禁：只有仓库所有者本人可以发版 ----
+      - name: '权限校验：仅仓库所有者（${{ github.repository_owner }}）可发版'
+        if: github.actor != github.repository_owner
+        run: |
+          echo "::error::当前触发者 ${{ github.actor }} 无权发版，只有仓库所有者 ${{ github.repository_owner }} 可以发布。"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: '构建 web-ui-enhance client 面（tsdown）'
+        run: pnpm --filter @linjianyu/dsh-web-ui-enhance run build:client
+
+      - name: Run all tests
+        run: pnpm -r run test
+
+      - name: Publish to npm
+        id: publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ inputs.target }}" == "all" ]]; then
+            pkgs=(dsh-wechat-bridge dsh-bridge-runner web-ui-enhance)
+          else
+            pkgs=("${{ inputs.target }}")
+          fi
+
+          published="[]"
+          for pkg in "${pkgs[@]}"; do
+            dir="packages/$pkg"
+            if [[ ! -f "$dir/package.json" ]]; then
+              echo "::error::仓库中没有 packages/$pkg"
+              exit 1
+            fi
+
+            name="$(node -p "require('./$dir/package.json').name")"
+            version="$(node -p "require('./$dir/package.json').version")"
+
+            # 跳过 private 包（如 dsh-web-gateway）
+            if [[ "$(node -p "require('./$dir/package.json').private === true")" == "true" ]]; then
+              echo "::warning::跳过 private 包 $name（packages/$pkg）"
+              continue
+            fi
+
+            # 版本冲突校验：npm 不允许覆盖同名同版本，提前给出友好报错
+            existing="$(npm view "$name@$version" version 2>/dev/null || true)"
+            if [[ -n "$existing" ]]; then
+              echo "::error::$name@$version 已存在于 npm registry，请先在 packages/$pkg/package.json 里 bump version 再触发发版。"
+              exit 1
+            fi
+
+            echo "==> 发布 $name@$version（dry_run=${{ inputs.dry_run }}）"
+            (cd "$dir" && npm publish --access public $DRY_RUN)
+
+            if [[ "${{ inputs.dry_run }}" == "false" ]]; then
+              published="$(node -e 'const a=JSON.parse(process.argv[1]);a.push(process.argv[2]);console.log(JSON.stringify(a))' "$published" "$pkg:$name@$version")"
+            fi
+          done
+
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+          echo "::notice::发布结果：$published（若为 [] 表示演练模式或全部被跳过）"
+
+  # ---- 可选：为刚发布的包创建 GitHub Release（tag: <包目录>@<version>）----
+  github-release:
+    name: 创建 GitHub Release
+    needs: publish
+    if: ${{ inputs.create_github_release == 'true' && !fromJSON(inputs.dry_run) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: '权限校验'
+        if: github.actor != github.repository_owner
+        run: |
+          echo "::error::当前触发者 ${{ github.actor }} 无权发版，只有仓库所有者 ${{ github.repository_owner }} 可以发布。"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 为每个已发布包创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISHED: ${{ needs.publish.outputs.published }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$PUBLISHED" == "[]" || -z "$PUBLISHED" ]]; then
+            echo "::warning::没有已发布的包，跳过 GitHub Release 创建"
+            exit 0
+          fi
+
+          echo "$PUBLISHED" | jq -r '.[]' | while IFS= read -r item; do
+            dir="${item%%:*}"
+            rest="${item#*:}"
+            name="${rest%@*}"
+            version="${rest##*@}"
+            tag="${dir}@${version}"
+            echo "==> gh release create $tag（$name $version）"
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$name $version" \
+              --generate-notes \
+              --target "$GITHUB_SHA"
+          done

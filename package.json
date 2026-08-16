@@ -7,6 +7,7 @@
   "engines": {
     "node": ">=18"
   },
+  "packageManager": "pnpm@11.7.0",
   "scripts": {
     "test": "pnpm -r run test",
     "publish:all": "pnpm -r publish --no-git-checks"
