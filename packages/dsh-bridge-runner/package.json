@@ -5,7 +5,8 @@
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
-    "test": "node test-image-compat.mjs"
+    "test": "node test-image-compat.mjs",
+    "test:resume-switch": "node test-resume-model-switch.mjs"
   },
   "exports": {
     ".": {

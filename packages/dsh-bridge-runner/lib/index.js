@@ -39,12 +39,17 @@ const internals = {
 };
 
 /**
- * 从一轮 events 里聚合「最后一个 assistant 文本」。
+ * 从一轮 events 里聚合「最后一个 assistant 文本」与「该轮的结束原因」。
  * 只统计 firstSeq 之后（含）的事件，避免把历史轮次重复当成新产出。
+ * 结束原因来自 turn/end 的 reason：当本轮因错误（如切到 text-only 模型后历史里的
+ * image 块触发 UNSUPPORTED_CONTENT）而中止时，reason.kind === "error"，
+ * 必须把它往上抛，否则会变成「16ms 的空回复 / （无文本回复）」而被当成成功。
+ * @returns {{text:string, reason?:object}}
  */
 function summarize(events, firstSeq) {
   let started = false;
   let text = "";
+  let reason;
   for (const event of events) {
     if (event.seq < firstSeq) continue;
     if (event.type === "turn/start") {
@@ -59,8 +64,9 @@ function summarize(events, firstSeq) {
         .join("");
       if (joined !== "") text = joined;
     }
+    if (event.type === "turn/end") reason = event.data.reason;
   }
-  return text;
+  return { text, reason };
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +156,17 @@ async function run(ctx, config, io) {
     const persistence = ctx.get("sessionPersistence");
     if (persistence !== void 0) {
       try {
-        const resumed = await agents.resume({ resumeSessionId: identity, agentOptions });
+        const resumed = await agents.resume({
+          resumeSessionId: identity,
+          agentOptions,
+          // 与 create 路径对称：resume 后也必须重新安装 model selection，
+          // 否则跨进程重启(或 /config model、/config workspace 触发换进程)恢复的会话，
+          // set_model / @model 热切的 selection.current 不再被 agent/request 注入到 LLM 请求，
+          // 模型切换会静默失效（selection 变了但请求仍用 resume 时的 agentOptions 模型）。
+          setup: (agentCtx) => {
+            installModelSelection(agentCtx, selection);
+          },
+        });
         agent = resumed.agent;
         io.stderr.write(`dsh-resident: resumed session ${sessionId}\n`);
       } catch (err) {
@@ -285,9 +301,23 @@ async function run(ctx, config, io) {
         source: { kind: "user" },
       }));
       await agent.whenIdle();
-      const reply = summarize(agent.session.events, firstSeq);
+      const outcome = summarize(agent.session.events, firstSeq);
       await sessions.flush(agent.session).catch(() => {});
-      emit(id, { ok: true, reply });
+      if (outcome.reason?.kind === "error") {
+        const err = outcome.reason.error;
+        // turn 级错误：resident 进程本身健康，标记 turn:true 让桥侧不要丢弃常驻进程，
+        // 否则一次 UNSUPPORTED_CONTENT 之类的内容错误会误杀常驻进程、触发无谓的 resume。
+        emit(id, { ok: false, turn: true, error: err?.message ?? err?.code ?? String(err ?? "turn failed") });
+      } else {
+        // 测试检查钩子（DSH_RUNNER_TEST_INSPECT=1 时附加，生产默认关闭）：
+        // 供集成测试断言「resume 后 set_model/@model 是否真正流入请求装配」。
+        // installed=true 证明 installModelSelection 已在 resume 路径被安装，
+        // current/assembled 证明 selection.current 已随热切变更并由 assemble 采纳。
+        const inspect = process.env.DSH_RUNNER_TEST_INSPECT === "1"
+          ? { current: selection.current, assembled: selection.assembled }
+          : void 0;
+        emit(id, inspect === void 0 ? { ok: true, reply: outcome.text } : { ok: true, reply: outcome.text, _inspect: inspect });
+      }
     } catch (error) {
       emit(id, { ok: false, error: error instanceof Error ? error.message : String(error) });
     }
