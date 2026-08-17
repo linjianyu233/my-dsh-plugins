@@ -1,6 +1,6 @@
 {
   "name": "@linjianyu/dsh-web-gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DSH Web 蓝绿切换网关：常驻代理（http+ws）+ active/staging 双后端 + 探活 + 切流/drain/回滚 + Doctor（监控/诊断/AI 兜底）。零 npm 依赖，纯 node 内置模块。同时是 DSH bundle 插件：宿主层注册包内 skills 到全局层（所有工作区生效）。",
   "type": "module",
   "main": "index.js",
