@@ -1,7 +1,6 @@
 {
   "name": "@linjianyu/dsh-web-gateway",
   "version": "0.1.0",
-  "private": true,
   "description": "DSH Web 蓝绿切换网关：常驻代理（http+ws）+ active/staging 双后端 + 探活 + 切流/drain/回滚 + Doctor（监控/诊断/AI 兜底）。零 npm 依赖，纯 node 内置模块。",
   "type": "module",
   "main": "index.js",
@@ -13,8 +12,15 @@
   },
   "files": [
     "index.js",
-    "lib/"
+    "lib/",
+    "README.md",
+    "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/linjianyu233/my-dsh-plugins.git",
+    "directory": "packages/dsh-web-gateway"
+  },
   "scripts": {
     "test": "node --test tests/unit.test.mjs tests/p2.test.mjs"
   },

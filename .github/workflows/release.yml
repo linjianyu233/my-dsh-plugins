@@ -16,6 +16,7 @@ on:
           - dsh-wechat-bridge
           - dsh-bridge-runner
           - web-ui-enhance
+          - dsh-web-gateway
       dry_run:
         description: '演练模式：全流程预览（npm publish --dry-run），不真正上传'
         required: false
@@ -87,7 +88,7 @@ jobs:
           [[ "${{ inputs.dry_run }}" == "true" ]] && DRY_RUN="--dry-run"
 
           if [[ "${{ inputs.target }}" == "all" ]]; then
-            pkgs=(dsh-wechat-bridge dsh-bridge-runner web-ui-enhance)
+            pkgs=(dsh-wechat-bridge dsh-bridge-runner web-ui-enhance dsh-web-gateway)
           else
             pkgs=("${{ inputs.target }}")
           fi
@@ -103,7 +104,7 @@ jobs:
             name="$(node -p "require('./$dir/package.json').name")"
             version="$(node -p "require('./$dir/package.json').version")"
 
-            # 跳过 private 包（如 dsh-web-gateway）
+            # 跳过 private 包（防御性保留：万一以后某包重新标 private，仍然安全）
             if [[ "$(node -p "require('./$dir/package.json').private === true")" == "true" ]]; then
               echo "::warning::跳过 private 包 $name（packages/$pkg）"
               continue
