@@ -31,7 +31,10 @@ workflow 里已内置「触发者必须是仓库所有者」的硬校验，以�
    |---|---|---|
    | `target` | `all` = 发布全部可发布包（含 `dsh-web-gateway`）；或单选 `dsh-wechat-bridge` / `dsh-bridge-runner` / `web-ui-enhance` / `dsh-web-gateway` | `all` |
    | `dry_run` | 演练：完整走一遍流程（`npm publish --dry-run`），不真正上传 | 否 |
-   | `create_github_release` | 发布成功后为每个已发布包创建 GitHub Release（tag：`<包目录>@<version>`，如 `dsh-wechat-bridge@1.4.0`） | 否 |
+
+   发布成功（`dry_run` 为否）后**自动**为每个已发布/已存在版本创建 GitHub Release
+   （tag：`<包目录>@<version>`，如 `dsh-web-gateway@0.2.0`）；已存在的 tag 会跳过
+   （幂等，可安全重跑用于补建 release）。不再需要单独手动发 tag。
 
 3. 流水线自动执行：**权限校验 → 装依赖 → 构建 `web-ui-enhance` client 面（tsdown）→ 跑全部测试（`pnpm -r run test`）→ 发布到 npm**。
 
@@ -39,7 +42,7 @@ workflow 里已内置「触发者必须是仓库所有者」的硬校验，以�
 
 - **权限门禁**：两个 job 第一步都校验 `github.actor != github.repository_owner`则直接失败——现在只有仓库所有者 `linjianyu233`（所有者）能发版；以后若给协作者加了 write 权限，他们也无法用此 workflow 发版。若以后想让某协作者也能发版，把条件从 `github.repository_owner` 改成允许名单即可。
 - **自动跳过 private 包**：防御性保留——某包若重新标记 `"private": true` 则不会被打包上传（`dsh-web-gateway` 已于 0.1.0 起可发布）。
-- **版本冲突预检**：发布前 `npm view <pkg>@<version>` 查 registry；已存在则终止并用 `::error::` 提示先 bump。
+- **版本冲突预检**：发布前 `npm view <pkg>@<version>` 查 registry；已存在则**跳过发布**但仍计入「已发布项」继续走 GitHub Release——让「补建 release / 幂等重跑」可用（不会再像旧版那样直接 fail）。
 - **凭据权限最小化**：全局 `permissions: contents: read`；只有 `github-release` job 单独放开 `contents: write`；npm 凭据全部来自 `NPM_TOKEN` secret，不会入库（根 `.npmrc` 只含 `@linjianyu` scope 映射，可提交）。
 - **并发保护**：`concurrency: npm-release` 保证同一时间只有一个发版流程在跑，防止两个 workflow 同时 publish 互相踩版本。
 

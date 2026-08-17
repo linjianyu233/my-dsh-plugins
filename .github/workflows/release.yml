@@ -22,11 +22,6 @@ on:
         required: false
         default: false
         type: boolean
-      create_github_release:
-        description: '发布成功后为每个已发布包创建 GitHub Release（tag 形如 <包目录>@<version>）'
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: npm-release
@@ -110,11 +105,15 @@ jobs:
               continue
             fi
 
-            # 版本冲突校验：npm 不允许覆盖同名同版本，提前给出友好报错
+            # 版本冲突校验：npm 不允许覆盖同名同版本。已存在视为「该版本已发过」——
+            # 跳过 publish 但计入 published，让「补建 GitHub Release / 幂等重跑」可用。
             existing="$(npm view "$name@$version" version 2>/dev/null || true)"
             if [[ -n "$existing" ]]; then
-              echo "::error::$name@$version 已存在于 npm registry，请先在 packages/$pkg/package.json 里 bump version 再触发发版。"
-              exit 1
+              echo "::notice::$name@$version 已存在于 npm registry，跳过发布（版本未变，仅走 release 流程）"
+              if [[ "${{ inputs.dry_run }}" == "false" ]]; then
+                published="$(node -e 'const a=JSON.parse(process.argv[1]);a.push(process.argv[2]);console.log(JSON.stringify(a))' "$published" "$pkg:$name@$version")"
+              fi
+              continue
             fi
 
             echo "==> 发布 $name@$version（dry_run=${{ inputs.dry_run }}）"
@@ -128,11 +127,13 @@ jobs:
           echo "published=$published" >> "$GITHUB_OUTPUT"
           echo "::notice::发布结果：$published（若为 [] 表示演练模式或全部被跳过）"
 
-  # ---- 可选：为刚发布的包创建 GitHub Release（tag: <包目录>@<version>）----
+  # ---- 发布成功即自动创建 GitHub Release（tag: <包目录>@<version>）----
+  # 不再需要手动开关：只要 publish job 产出了已发布项（含已存在版本=补建场景），
+  # 非演练模式就自动建 release；已存在的 tag 跳过（幂等，可安全重跑）。
   github-release:
     name: 创建 GitHub Release
     needs: publish
-    if: ${{ github.event.inputs.create_github_release == 'true' && github.event.inputs.dry_run == 'false' }}
+    if: ${{ github.event.inputs.dry_run == 'false' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -164,6 +165,10 @@ jobs:
             name="${rest%@*}"
             version="${rest##*@}"
             tag="${dir}@${version}"
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::notice::$tag 已存在，跳过"
+              continue
+            fi
             echo "==> gh release create $tag（$name $version）"
             gh release create "$tag" \
               --repo "$GITHUB_REPOSITORY" \
