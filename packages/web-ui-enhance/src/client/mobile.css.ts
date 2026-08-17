@@ -142,15 +142,20 @@ export const mobileCss = /* css */ `
 
   /* 4) 模型名选择器在手机单独一行。
      关键：CSS 的 :has() 不能嵌套（":has(> :has(...))" 是非法的），所以无法用
-     :has() 从 model slot 回溯两级命中 toolbar 行 .row。改用两件事：
-     a) .row（toolbar 行）设 flex-wrap: wrap —— 用 rc.6 的 CSS Module 哈希类名
-        uV2eYG_row 直接命中（未来 DSH 升级若改这组哈希需复核；类名前缀
-        uV2eYG 是 InputBar.module.css 的哈希）。
-     b) .trailing（模型名+上下文+发送右组）用已验明合法的单层
+     :has() 从 model slot 回溯两级命中 toolbar 行 .row。改用两件事，全部用
+     CSS Module 哈希不了的稳定锚点（不再碰哈希类名，DSH 升级也不易失效）：
+     a) toolbar 行（承载左组 tools + 右组 trailing 的 flex 容器）设
+        flex-wrap: wrap —— 用稳定属性 [data-composer-card] 精确命中该行：
+        > [data-composer-card] > :has([data-slot="conversation.input.model"]) <
+        是该行唯一匹配（它唯一的直接子级里含 model slot 的是 trailing），
+        等价于旧哈希类 .uV2eYG_row（该哈希已变、不可依赖）。
+     b) trailing 右组（模型名+上下文+发送）用已验明合法的单层
         ":has(> [data-slot=\"conversation.input.model\"])" 命中，设 flex:1 1 100%
         独占换行后的第二行。
-     这样加号/权限留在第一行，模型名组换到第二行，互不重叠。 */
-  [data-composer-seat] .uV2eYG_row {
+     这样加号/权限留在第一行，模型名组换到第二行，互不重叠（实测：row
+     nowrap 时 trailing 的 flex-basis:100% 会被压回同一行并溢出到发送键上，
+     这正是重叠根因；a 的 wrap 让 trailing 真正换行）。 */
+  [data-composer-card] > :has([data-slot='conversation.input.model']) {
     flex-wrap: wrap !important;
   }
   [data-composer-seat] :has(> [data-slot='conversation.input.model']) {

@@ -1,6 +1,6 @@
 {
   "name": "@linjianyu/dsh-web-ui-enhance",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Web UI 增强插件：侧边栏会话右键 → 复制 session id（跨 session 协同/问题定位用）。bundle 插件同时携带 client 面（dsh.client）",
   "type": "module",
   "main": "lib/index.js",
