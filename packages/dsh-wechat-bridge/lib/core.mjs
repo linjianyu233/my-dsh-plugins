@@ -50,6 +50,34 @@ export function buildConfig(values = {}) {
 
 export const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
 export const safeKey = (chatId) => createHash("sha1").update(String(chatId)).digest("hex").slice(0, 16);
+
+/**
+ * 把 dsh 子进程的失败输出整理成可读摘要（发给微信/日志用）。
+ * Node 崩溃时 stderr 末尾常是 `} | } | Node.js v22.23.2` 这类栈尾/对象转储，
+ * 只取最后三行对用户毫无信息量；这里优先提取真正的错误标题
+ * （Error: / Cannot… / MISSING_CREDENTIAL 等首条问题行）与退出码，再附末尾几行佐证。
+ * @param {string} stderrText 原始 stderr（可含 ANSI 颜色码）
+ * @param {number|string} code 子进程退出码
+ * @returns {string} 一行的可读摘要
+ */
+export function summarizeDshFailure(stderrText, code) {
+  const errStrip = stripAnsi(String(stderrText ?? "")).trim();
+  const lines = errStrip.split("\n").filter(Boolean).map((l) => l.trim()).filter(Boolean);
+  const headRe = /^(Error|TypeError|ReferenceError|SyntaxError|RangeError|AggregateError|URIError|AssertionError|Uncaught|Cannot find|Failed|ENOENT|EACCES|EPERM|EROFS|MISSING_CREDENTIAL|NO_ADAPTER|fetch failed|任务超时|已取消)/i;
+  const causeRe = /Cannot find (module|the native)|failed to load|missing native|not found|no api key|no adapter|is not valid json|unexpected token/i;
+  const notFrame = (l) => !/^(at\s|\^|node:|file:|internal\/)/.test(l) && !/^Node\.js v\d/.test(l) && l !== "{";
+  const head = lines.find((l) => headRe.test(l)) ?? lines.find((l) => notFrame(l) && /[ :]/.test(l) && !/^[\]}],?$/.test(l)) ?? lines[0] ?? "";
+  const cause = lines.find((l) => l !== head && causeRe.test(l)) ?? "";
+  const tailLines = lines.slice(-3);
+  const bits = [
+    (head || cause || "").slice(0, 400),
+    cause ? `深层原因：${cause.slice(0, 300)}` : "",
+    `退出码 ${code}`,
+    tailLines.length ? `末尾：${tailLines.join(" | ")}` : "",
+  ].filter(Boolean).join("；");
+  return bits || `退出码 ${code}`;
+}
+
 export const cleanChatId = (chatId) => String(chatId).replace(/[\r\n\t]/g, " ").slice(0, 64);
 export const tail = (s, n = 400) => (s.length > n ? "…" + s.slice(-n) : s);
 export const log = (...a) => process.stderr.write(`[bridge ${new Date().toISOString()}] ${a.join(" ")}\n`);
@@ -278,8 +306,8 @@ export function spawnDsh(dsh, task, cwd, timeoutMs, { signal, onProgress, permis
       if (code === 0) {
         finish({ ok: true, stdout: out });
       } else {
-        const detail = err.trim().split("\n").filter(Boolean).slice(-3).join(" | ") || `退出码 ${code}`;
-        finish({ ok: false, error: detail, exitCode: code, stderrTail: detail });
+        const detail = summarizeDshFailure(stderr, code);
+        finish({ ok: false, error: detail, exitCode: code, stderrTail: tail(stripAnsi(stderr), 800) });
       }
     });
     if (signal) {

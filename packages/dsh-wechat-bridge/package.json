@@ -1,6 +1,6 @@
 {
   "name": "@linjianyu/dsh-wechat-bridge",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "把 DeepSeek Harness (DSH) 接到微信「龙虾」(ClawBot)：iLink 协议直连 + 通用桥接，零依赖",
   "type": "module",
   "main": "./lib/core.mjs",
