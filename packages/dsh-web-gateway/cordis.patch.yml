@@ -1,0 +1,16 @@
+# @linjianyu/dsh-web-gateway —— bundle patch（路线 B：包内 skills 直挂全局层）。
+#
+# 本包是「独立 daemon + bundle 插件」双面（与 dsh-bridge-runner 同构）：
+# - daemon 面（index.js / dsh-gateway bin）保持独立进程，不需要本 patch 也能跑；
+# - bundle 面由本 patch 挂进宿主层：apply() 里把包内 skills/ 注册成技能注册表
+#   **全局层**的 provider → 所有工作区、所有会话都能读到「当前安装版本」的
+#   网关管理 skill；卸载包即消失，不拷贝、不污染 ~/.dsh/skills。
+#
+# 与 web-ui-enhance 一样，这是叠加在 web 基础层之上的增量 patch：
+# - insert 的行按 id 去重，重复安装不会叠错。
+# - 依赖技能注册表服务（@deepseek-ai/dsh-skill，宿主层常驻；web 面仅禁用
+#   skill-filesystem/tool-skill 两个 per-agent 行，注册表本身保留）。
+
+- insert:
+    - id: web-gateway
+      name: '@linjianyu/dsh-web-gateway/plugin'

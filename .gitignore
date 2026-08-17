@@ -27,3 +27,6 @@ Thumbs.db
 # 调研/研究笔记（过程产物，勿入库）
 _res-*.md
 _dsh-doc-*.md
+
+# 本地 E2E / 切换调试的临时目录
+tmp-test-logs/

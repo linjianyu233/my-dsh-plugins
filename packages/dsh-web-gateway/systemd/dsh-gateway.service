@@ -1,0 +1,36 @@
+[Unit]
+Description=DSH Web blue-green gateway (dsh-web-gateway)
+# 网关要拉起 dsh 后端并经 127.0.0.1:7897 代理访问外部 LLM API：
+# 等网络就绪再起，避免重启风暴时探活全失败。
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 显式 node 绝对路径 + bin 软链，避免 systemd user 环境 shebang/PATH 解析问题。
+ExecStart=/home/lin/.nvm/versions/node/v22.23.2/bin/node /home/lin/.local/bin/dsh-gateway up --port 8181 --profile web
+# 任何退出原因（kill -9/崩溃/exit）都 3 秒内拉起。
+Restart=always
+RestartSec=3
+# 关键：只杀 gateway 自身，把 active 后端留成孤儿 → 下次启动 _adoptExisting() 纳管，
+# 服务几乎无感。默认 control-group 会把后端一起 SIGTERM，自愈就名存实亡。
+KillMode=process
+TimeoutStopSec=10
+
+# 窄环境必须显式补齐：nvm node 目录 + .local/bin（dsh-gateway 软链所在）。
+Environment="PATH=/home/lin/.local/bin:/home/lin/.nvm/versions/node/v22.23.2/bin:/usr/bin:/bin"
+# 后端 dsh：nvm 全局 @deepseek-ai/dsh（v0.1.0-rc.7）。spawn.js 用 DSH_BIN 的绝对路径匹配
+# 孤儿进程，写死绝对路径最稳。
+Environment=DSH_BIN=/home/lin/.nvm/versions/node/v22.23.2/bin/dsh
+# 与 opencode 手动启动时完全一致的环境镜像：
+# NODE_OPTIONS 激活 EnvHttpProxyAgent，配合代理变量让 LLM 走 127.0.0.1:7897。
+Environment=NODE_OPTIONS=--use-env-proxy
+Environment=http_proxy=http://127.0.0.1:7897
+Environment=https_proxy=http://127.0.0.1:7897
+Environment=all_proxy=socks5://127.0.0.1:7897
+Environment=no_proxy=localhost,127.0.0.1,::1
+# 后端自愈：active 连续 3 次探活失败自动以相同配置重拉。
+Environment=DSH_GATEWAY_WATCHDOG=1
+
+[Install]
+WantedBy=default.target

@@ -3,7 +3,9 @@
 常驻网关（HTTP + WebSocket 代理）+ active/staging 双后端 + 探活 + 切流/drain/回滚。
 让 `dsh web` 的插件/配置更新变成「入口地址不变、刷新一次即用上新版本」的蓝绿发布。
 
-**零 npm 依赖**（纯 node 内置模块），独立常驻进程，不是 dsh profile 插件。
+**零 npm 依赖**（纯 node 内置模块），独立常驻进程。
+同时是 **DSH bundle 插件**：随包发布 `skills/`，装进 profile 后由宿主层注册为
+技能注册表**全局层** provider（所有工作区生效，见下文「作为 DSH bundle 插件」）。
 
 ---
 
@@ -77,14 +79,45 @@ dsh-gateway exit --port 8181
 
 `DSH_GATEWAY_WATCHDOG=1` 启用：定时探活 active，连续失败 3 次自动以**相同配置**重拉新实例（探活到 ready 后接回代理），带退避防抖（默认 10s，防崩溃循环）。open-update 期间自动暂停监控。
 
-### 网关自身 HA（P3）
+### 网关自身 HA（P3，已落地）
 
-- **systemd 保活**：`~/.config/systemd/user/dsh-gateway.service`（`Restart=always`，自动拉起）。注意 systemd user 环境 PATH 窄，unit 里必须显式带 nvm bin 的 `PATH`，否则 `dsh`（`#!/usr/bin/env node`）起不来。
+- **systemd 保活**：unit 文件在仓库 `systemd/dsh-gateway.service`，部署到
+  `~/.config/systemd/user/` 并 `systemctl --user enable --now dsh-gateway`、
+  `loginctl enable-linger <user>`。`Restart=always` + `RestartSec=3` 任何死法都自动拉起；
+  `KillMode=process` 保证 systemd 只杀网关进程、不动后端，重启重纳管才成立。
+- **环境镜像（关键，勿删）**：systemd user 环境是裸的，unit 必须显式带上
+  `NODE_OPTIONS=--use-env-proxy`、`http(s)_proxy=127.0.0.1:7897`、`all_proxy`、
+  `no_proxy` 与 `DSH_BIN`（nvm 全局 `dsh`）——缺失会让后端 LLM 请求走不了代理，
+  opencode 等 provider 直接哑掉。PATH 也要显式含 nvm bin（`bin` 的
+  `#!/usr/bin/env node` 依赖它）。
 - **重启重纳管**：gateway 重启后若发现存量存活的原 active（孤儿），`_adoptExisting()` 直接纳管（pid/port 进 registry），不另起重复实例；绝不纳管 5100（GUI 宿主）。
 - **adopt 兼容**：被纳管的 active 的 `child` 是 shim（无真实 exit 事件）；`terminate()`/`waitExit()` 对 shim 回退到 `pidAlive` 轮询，保证 open-update 的 drain 对纳管实例同样有效。
-- 完整闭环已验证：`kill -9 gateway` → systemd 拉起 → 恢复 200 → 可继续蓝绿切换 → tailscale 不变。
+- 完整闭环已实测：`kill -9 gateway` → systemd 3s 拉起 → adopt 原 active（同端口）→ 恢复 200 → 可继续蓝绿切换 → tailscale 不变。
 
 浏览器访问：`http://127.0.0.1:8181/`（同一地址长期不变）。
+
+---
+
+## 作为 DSH bundle 插件（路线 B：包内 skills 直挂全局层）
+
+本包同时是 bundle 插件形态：`package.json` 声明 `dsh.bundle.patch` →
+`cordis.patch.yml` 把 `@linjianyu/dsh-web-gateway/plugin` 挂进 profile 宿主层，
+`apply()` 里 `ctx.skills.registerProvider()` 把包内 `skills/` 目录注册成技能
+provider（`web-gateway-skills`，rank 600 bundled，对齐官方 dsh-skill-badge）。
+
+- **生效范围**：宿主层注册 → 技能注册表**全局层** → **所有工作区、所有会话**可见；
+- **永远是最新安装版本**：内容直接读 `<pkg>/skills/`，重装/升级包即换新，无需拷贝、
+  不写 `~/.dsh/skills`；卸载包即自动消失。
+- **同名可覆盖**：rank 600 意味着用户/项目本地技能（更低 rank）可同名覆盖。
+
+安装（先把新版本发到 npm，或本仓库 `pnpm publish` 后执行）：
+
+```sh
+dsh plugin --profile web add @linjianyu/dsh-web-gateway
+```
+
+装完重启 dsh web 会话即可在技能目录看到 `dsh-web-gateway`（网关管理）技能。
+daemon 面（`dsh-gateway`）不依赖此 patch，照常独立运行。
 
 ### 关于 `--patch` 参数顺序（D 关键陷阱）
 
@@ -149,7 +182,12 @@ packages/dsh-web-gateway/
   lib/watchdog.js     active 健康监控 + 自拉起（阈值/防抖/退避）
   lib/doctor.js       规则诊断引擎（EADDRINUSE/patch/config 等）
   lib/ai.js           LLM 兜底（DeepSeek chat，读凭据/环境变量，可降级）
+  lib/plugin.js       Cordis bundle 入口（apply() 注册全局层 skills provider）
+  lib/skill-provider.js  包内 skills 目录的零依赖 SkillProvider（frontmatter 解析 + 发现 + 加载）
+  skills/dsh-web-gateway/SKILL.md   随包发布的「网关管理」技能
+  cordis.patch.yml    bundle patch（insert web-gateway 行）
   tests/unit.test.mjs
+  tests/skill-provider.test.mjs
   tests/p2.test.mjs
 ```
 
