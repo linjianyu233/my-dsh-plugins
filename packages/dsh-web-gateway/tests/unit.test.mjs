@@ -5,27 +5,40 @@ import { Registry } from "../lib/registry.js";
 import { forwardHeaders } from "../lib/proxy.js";
 import { pidAlive } from "../lib/prober.js";
 
-test("forwardHeaders: /api 路径 → loopback Host + 删 Origin（穿透 DSH 围栏）", () => {
+test("forwardHeaders: /api 路径 → loopback Host + Origin 改写为 loopback（穿透 DSH 围栏）", () => {
   const h = forwardHeaders(
     { host: "gateway.example.com", origin: "https://gateway.example.com", "sec-fetch-site": "cross-site", "x-keep": "1" },
     5210,
     "/api/events.mux"
   );
-  assert.equal(h.Host, "127.0.0.1:5210");
-  assert.equal(h.origin, undefined);
+  assert.equal(h.host, "127.0.0.1:5210");
+  assert.equal(h.origin, "http://127.0.0.1:5210"); // Origin 不再携带外部源，但仍与 Host 相等 → 围栏放行
   assert.equal(h["sec-fetch-site"], undefined);
   assert.equal(h["x-keep"], "1");
 });
 
-test("forwardHeaders: 非 /api（dsh-market POST）→ 保留 Origin + Host 置为 Origin.host（同源）", () => {
+test("forwardHeaders: /sidebar（dsh-better-sidebar 围栏）外部地址 → loopback Host + Origin 改写，不再 403", () => {
+  // 回归：Tailscale/LAN IP 访问网关时，/sidebar 围栏要求 Host loopback 或 trustedHosts，
+  // 旧配方把外部 Host 透传 → 403 forbidden（Explorer 显示 forbidden）。v2 统一改写。
   const h = forwardHeaders(
-    { host: "127.0.0.1:8181", origin: "http://127.0.0.1:8181", "x-keep": "1" },
+    { host: "100.80.135.58:8181", origin: "http://100.80.135.58:8181", "sec-fetch-site": "same-origin" },
+    5210,
+    "/sidebar/api/fs.tree"
+  );
+  assert.equal(h.host, "127.0.0.1:5210");
+  assert.equal(h.origin, "http://127.0.0.1:5210");
+  assert.equal(h["sec-fetch-site"], undefined);
+});
+
+test("forwardHeaders: 非 /api（dsh-market POST）→ loopback Host + Origin 改写（sameOrigin 仍成立）", () => {
+  const h = forwardHeaders(
+    { host: "192.168.3.4:8181", origin: "http://192.168.3.4:8181", "x-keep": "1" },
     5210,
     "/dsh-market/install"
   );
-  // sameOrigin() 要求 new URL(origin).host === Host → Host 必须等于 origin.host
-  assert.equal(h.host, "127.0.0.1:8181");
-  assert.equal(h.origin, "http://127.0.0.1:8181"); // Origin 保留
+  // dshmarket sameOrigin() 要求 new URL(origin).host === Host → 两者都改成 loopback 后端即成立
+  assert.equal(h.host, "127.0.0.1:5210");
+  assert.equal(h.origin, "http://127.0.0.1:5210");
   assert.equal(h["sec-fetch-site"], undefined);
   assert.equal(h["x-keep"], "1");
 });
@@ -33,7 +46,15 @@ test("forwardHeaders: 非 /api（dsh-market POST）→ 保留 Origin + Host 置�
 test("forwardHeaders: 非 /api 但无 Origin（静态导航 GET）→ loopback Host", () => {
   const h = forwardHeaders({ host: "gw.x", "sec-fetch-site": "same-origin" }, 5210, "/app.js");
   assert.equal(h.host, "127.0.0.1:5210");
+  assert.equal(h.origin, undefined);
   assert.equal(h["sec-fetch-site"], undefined);
+});
+
+test("forwardHeaders: 空 Origin（node http 无此键）→ 不合成 Origin", () => {
+  const h = forwardHeaders({ host: "127.0.0.1:8181", "content-type": "application/json" }, 5210, "/sidebar/api/ping");
+  assert.equal(h.host, "127.0.0.1:5210");
+  assert.equal(h.origin, undefined);
+  assert.equal(h["content-type"], "application/json");
 });
 
 test("registry: claim/promote/release lifecycle", () => {

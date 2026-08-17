@@ -22,10 +22,22 @@
 
 ---
 
-## 转发配方（P0 实测闭环，无需 --trusted-host）
+## 转发配方（v2 统一改写，修复 dsh-better-sidebar 经网关 403）
 
-转发时把入站 `Host` 重写为 `127.0.0.1:<backendPort>`，并 **删除** `Origin`（含 `sec-fetch-site`）。
-这样能同时穿透 `dsh-client-connection` 的信任围栏：
+**无论路径**，转发时都把自己呈现为「loopback 后端源」：入站 `Host` 重写为
+`127.0.0.1:<backendPort>`；原请求带 `Origin` 时**改写**为 `http://127.0.0.1:<backendPort>`
+（不删除，保证 `new URL(origin).host === Host`）；删除 `sec-fetch-site`。
+这样能同时穿透两类信任围栏：
+
+- DSH 式围栏（`dsh-client-connection` `/api` 与 dsh-better-sidebar 复制自它的 `/sidebar/*`）：
+  Host 是 loopback → 放行；Origin 与 Host 相等 → 放行。**经网关用非 loopback 地址**
+  （Tailscale / LAN IP / 主机名）访问时 `/sidebar/api/*`、`/sidebar/file`、`/sidebar/html`、
+  `/sidebar/ws/*` 都不再 403 —— 修复 Explorer 显示 forbidden。
+- dshmarket 式 `sameOrigin()`（仅要求 `new URL(origin).host === host`）：改写后仍相等 → 不回归
+  'untrusted origin'。
+
+> 旧配方（v1）对非 `/api` 路径「保留 Origin 并把 Host 设成 Origin 的 host」，导致外部
+> 地址访问时 `/sidebar/*` 围栏收到非 loopback Host → 403。v2 不再依赖外部访问地址。
 
 - 静态 SPA：`GET /` → 200
 - `/api` RPC：→ 426/404（进入 bridge）
@@ -131,7 +143,7 @@ packages/dsh-web-gateway/
   lib/registry.js     active/staging 槽位状态机
   lib/spawn.js        分配空闲端口 + spawn dsh web（捕获日志）
   lib/prober.js       探活组合（PID/TCP/HTTP）
-  lib/proxy.js        HTTP + WS 转发（Host 重写 + 删 Origin；WS 原样回传 101）
+  lib/proxy.js        HTTP + WS 转发（Host/Origin 统一改写为 loopback；WS 原样回传 101）
   lib/idle.js         空闲采样（in-flight 计数 + 安静窗口）
   lib/orchestrate.js  蓝绿流程 + 回滚（含 shim-child drain 兼容）
   lib/watchdog.js     active 健康监控 + 自拉起（阈值/防抖/退避）

@@ -5,7 +5,7 @@
 
 import { createGateway } from "./proxy.js";
 import { Registry } from "./registry.js";
-import { spawnBackend, allocPort, logDir } from "./spawn.js";
+import { spawnBackend, allocPort, logDir, dshBin } from "./spawn.js";
 import { singleProbe, waitUntil } from "./prober.js";
 import { openUpdate } from "./orchestrate.js";
 import { createIdleMonitor } from "./idle.js";
@@ -113,7 +113,11 @@ export class Gate {
       if (!m) continue;
       const pid = Number(m[1]);
       const args = m[2];
-      if (!args.includes("dsh") || !args.includes("--profile") || !args.includes(profile)) continue;
+      // DSH_BIN 是路径（如 /path/to/bin.js，ps 显示 `node <path> …`）时 argv 不含 "dsh"，
+      // 用实际 DSH_BIN 匹配；默认命令名 "dsh" 则按名字匹配。否则重启后孤儿实例永不纳管。
+      const bin = dshBin();
+      const matchesDsh = bin.includes("/") ? args.includes(bin) : args.includes("dsh");
+      if (!matchesDsh || !args.includes("--profile") || !args.includes(profile)) continue;
       if (/--port\s+5100/.test(args)) continue; // 绝不纳管 GUI 宿主
       const portM = args.match(/--port\s+(\d+)/);
       if (!portM) continue;
